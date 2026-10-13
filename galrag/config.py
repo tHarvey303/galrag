@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     pub_delay_s: float = 5.0
     http_timeout_s: float = 60.0
     max_pdf_mb: int = 60
+    fetch_pub_pdf: bool = True        # try publisher PDFs via the ADS link gateway when no arXiv version
 
     # --- text processing ---
     chunk_target_tokens: int = 350

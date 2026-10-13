@@ -95,6 +95,7 @@ class Paragraph(BaseModel):
     char_start: int
     char_end: int
     page: int | None = None       # 1-based, PDFs only
+    page_end: int | None = None   # set when a PDF paragraph crosses a page
     cites: list[CiteMarker] = Field(default_factory=list)
 
 
@@ -113,6 +114,8 @@ class BibEntry(BaseModel):
     year: int | None = None
     title: str | None = None
     journal: str | None = None
+    volume: str | None = None
+    page: str | None = None
     arxiv_id: str | None = None
     doi: str | None = None
     bibcode: str | None = None    # resolved against the citing paper's ADS reference list
