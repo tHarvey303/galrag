@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "galrag"
+version = "0.1.0"
+description = "MCP-based, citation-verifiable RAG over the high-redshift galaxy-evolution literature (ADS + arXiv full text, LanceDB, CPU embeddings)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Tom Harvey"}]
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.3",
+  "typer>=0.12",
+  "rich>=13",
+  "tqdm>=4.66",
+  "tenacity>=8.3",
+  "beautifulsoup4>=4.12",
+  "lxml>=5",
+  "pymupdf>=1.24",
+  "pymupdf4llm>=0.0.17",
+  "rapidfuzz>=3.9",
+  "lancedb>=0.15",
+  "tantivy>=0.22",
+  "pyarrow>=16",
+  "numpy>=1.26",
+  "sentence-transformers>=3.0",
+  "torch>=2.2",
+  "mcp[cli]>=1.2",
+  "feedparser>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+galrag = "galrag.cli:app"
+galrag-mcp = "galrag.server:main"
+
+[tool.setuptools.packages.find]
+include = ["galrag*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
