@@ -1,0 +1,253 @@
+- query: "What is the UV luminosity function at z>8 measured with JWST?"
+  expected_bibcodes:
+    - "2023MNRAS.518.6011D"
+    - "2024ApJ...969L...2F"
+    - "2023ApJS..265....5H"
+  notes: "Core JWST UV LF papers at z~8-15"
+- query: "Is there a slow evolution of the UV luminosity function at z>9 from CEERS?"
+  expected_bibcodes:
+    - "2024ApJ...969L...2F"
+  notes: "Finkelstein+24 complete CEERS sample"
+- query: "Evolution of the UV luminosity function from z~15 to z~8 with NIRCam medium bands"
+  expected_bibcodes:
+    - "2023MNRAS.523.1036B"
+    - "2023MNRAS.523.1009B"
+  notes: "Bouwens+23 UV LF and luminosity density"
+- query: "EPOCHS UV luminosity function 7.5<z<13.5 from public JWST fields"
+  expected_bibcodes:
+    - "2024ApJ...965..169A"
+  notes: "Adams+24 EPOCHS II"
+- query: "UV luminosity function at z~11 from public JWST ERS and ERO data"
+  expected_bibcodes:
+    - "2024MNRAS.527.5004M"
+  notes: "McLeod+24"
+- query: "Faint end of the UV luminosity function at z~9-12 from ultradeep NGDEEP imaging"
+  expected_bibcodes:
+    - "2023ApJ...954L..46L"
+  notes: "Leung+23 NGDEEP"
+- query: "z>9 UV luminosity function from JADES deep imaging"
+  expected_bibcodes:
+    - "2025ApJ...992...63W"
+  notes: "Whitler+25 JADES UV LF"
+- query: "Spectroscopic constraints on the UV luminosity function at z=9-16 and excess of bright galaxies"
+  expected_bibcodes:
+    - "2023ApJS..265....5H"
+    - "2022ApJ...940L..55F"
+  notes: "Harikane+23 and early z~12 candidate"
+- query: "What is the UV luminosity density at z=10?"
+  expected_bibcodes:
+    - "2023MNRAS.523.1009B"
+    - "2023MNRAS.518.6011D"
+    - "2024ApJ...969L...2F"
+  notes: "Specific number: rho_UV at z~10 from JWST LF papers"
+- query: "How does the cosmic UV luminosity density decline beyond z=10?"
+  expected_bibcodes:
+    - "2023MNRAS.523.1036B"
+    - "2024ApJ...965..169A"
+    - "2023MNRAS.518.6011D"
+  notes: "Evolution of rho_UV at z>10"
+- query: "Spectroscopic redshift confirmation of GN-z11 and its nitrogen enhancement"
+  expected_bibcodes:
+    - "2023A&A...677A..88B"
+  notes: "Bunker+23 GN-z11 NIRSpec"
+- query: "Morphology and environment of GN-z11 from JADES imaging"
+  expected_bibcodes:
+    - "2023ApJ...952...74T"
+  notes: "Tacchella+23 GN-z11 imaging"
+- query: "Spectroscopically confirmed galaxies at z>10 in JADES"
+  expected_bibcodes:
+    - "2023NatAs...7..622C"
+    - "2024Natur.633..318C"
+  notes: "Curtis-Lake+23 and Carniani+24"
+- query: "JADES-GS-z14-0 galaxy at redshift 14"
+  expected_bibcodes:
+    - "2024Natur.633..318C"
+  notes: "Carniani+24 z=14.32"
+- query: "What is the highest-redshift spectroscopically confirmed galaxy? MoM-z14 at z=14.4"
+  expected_bibcodes:
+    - "2026OJAp....956033N"
+  notes: "Naidu MoM-z14 (OJAp; bibcode as returned by ADS)"
+- query: "Little red dots as faint AGN at z~5"
+  expected_bibcodes:
+    - "2024ApJ...963..129M"
+    - "2024ApJ...964...39G"
+    - "2025ApJ...986..126K"
+  notes: "LRD AGN nature"
+- query: "Broad-line AGN ubiquity among red compact sources in UNCOVER"
+  expected_bibcodes:
+    - "2024ApJ...964...39G"
+  notes: "Greene+24"
+- query: "Candidate massive galaxies 600 Myr after the Big Bang"
+  expected_bibcodes:
+    - "2023Natur.616..266L"
+  notes: "Labbe+23"
+- query: "Rise of faint red AGN at z>4 in CEERS"
+  expected_bibcodes:
+    - "2025ApJ...986..126K"
+  notes: "Kocevski+24/25 LRD sample"
+- query: "Quiescent galaxies at very high redshift z>4"
+  expected_bibcodes:
+    - "2024Natur.629...53L"
+    - "2023Natur.619..716C"
+    - "2023MNRAS.520.3974C"
+  notes: "Looser+24, Carnall+23 quiescent"
+- query: "Strong Balmer break evidence for recently quenched galaxy at z~7"
+  expected_bibcodes:
+    - "2024Natur.629...53L"
+  notes: "Looser+24"
+- query: "Abundance of massive quiescent galaxies at 3<z<5 in JWST CEERS"
+  expected_bibcodes:
+    - "2023MNRAS.520.3974C"
+  notes: "Carnall+23 abundance"
+- query: "Reionization history constraints from CMB and early galaxies"
+  expected_bibcodes:
+    - "2015ApJ...802L..19R"
+    - "2015ApJ...811..140B"
+  notes: "Robertson+15 / Bouwens+15 reionization"
+- query: "Ionizing photon budget of galaxies for reionization with low escape fraction"
+  expected_bibcodes:
+    - "2019ApJ...879...36F"
+    - "2020ApJ...892..109N"
+    - "2024Natur.626..975A"
+  notes: "Photon budget papers"
+- query: "What escape fraction is needed to reionize the universe by z=6?"
+  expected_bibcodes:
+    - "2019ApJ...879...36F"
+    - "2015ApJ...802L..19R"
+    - "2020ApJ...892..109N"
+  notes: "Specific number: fesc requirement"
+- query: "Did faint dwarf galaxies drive reionization?"
+  expected_bibcodes:
+    - "2024Natur.626..975A"
+    - "2024MNRAS.535.2998S"
+  notes: "Atek+24, Simmonds+24"
+- query: "Ionizing photon production efficiency xi_ion of JADES galaxies"
+  expected_bibcodes:
+    - "2024MNRAS.535.2998S"
+  notes: "Simmonds+24"
+- query: "Review of galaxy formation and reionization unknowns for JWST"
+  expected_bibcodes:
+    - "2022ARA&A..60..121R"
+  notes: "Robertson+22 review"
+- query: "Neutral hydrogen fraction at z~7 from Lyman-alpha emission"
+  expected_bibcodes:
+    - "2018ApJ...856....2M"
+    - "2018ApJ...857L..11M"
+  notes: "Mason+18"
+- query: "Lyman-alpha emission in galaxies at z>6.5 with JWST NIRSpec"
+  expected_bibcodes:
+    - "2024ApJ...975..208T"
+    - "2024MNRAS.531.2701T"
+  notes: "Tang+24"
+- query: "Lyman-alpha emission in overdense region at z=6.8"
+  expected_bibcodes:
+    - "2022MNRAS.511.6042E"
+    - "2016ApJ...818L...3C"
+  notes: "Ionized bubbles / overdensities"
+- query: "Dust continuum detections in z>6.5 galaxies with ALMA REBELS"
+  expected_bibcodes:
+    - "2022MNRAS.515.3126I"
+    - "2022ApJ...931..160B"
+  notes: "REBELS Inami+22, Bouwens+22"
+- query: "ALPINE [CII] survey of normal star-forming galaxies at 4<z<6"
+  expected_bibcodes:
+    - "2020A&A...643A...1L"
+  notes: "Le Fevre+20"
+- query: "A dusty normal galaxy in the epoch of reionization (A1689-zD1)"
+  expected_bibcodes:
+    - "2015Natur.519..327W"
+  notes: "Watson+15"
+- query: "Bursty star formation and the excess of UV-bright galaxies at z>10"
+  expected_bibcodes:
+    - "2023MNRAS.521..497M"
+    - "2023MNRAS.525.3254S"
+  notes: "Mason+23, Shen+23"
+- query: "Feedback-free starbursts explaining massive galaxies at cosmic dawn"
+  expected_bibcodes:
+    - "2023MNRAS.523.3201D"
+  notes: "Dekel+23 FFB"
+- query: "Why are there so many luminous galaxies at z>10? Dust-free outflows"
+  expected_bibcodes:
+    - "2023MNRAS.522.3986F"
+    - "2023MNRAS.523.3201D"
+  notes: "Ferrara+23, Dekel+23"
+- query: "Nitrogen-rich galaxies and ISM conditions at z>5.5"
+  expected_bibcodes:
+    - "2023A&A...677A.115C"
+    - "2023A&A...677A..88B"
+  notes: "Cameron+23, Bunker+23"
+- query: "Cosmic star formation rate density history"
+  expected_bibcodes:
+    - "2014ARA&A..52..415M"
+    - "2023MNRAS.523.1009B"
+  notes: "Madau & Dickinson 2014"
+- query: "Galaxy stellar mass function at z=6-10 from Spitzer/IRAC"
+  expected_bibcodes:
+    - "2021ApJ...922...29S"
+  notes: "Stefanon+21"
+- query: "Lyman-break galaxies at z~3: first spectroscopic confirmation"
+  expected_bibcodes:
+    - "1996ApJ...462L..17S"
+  notes: "Steidel+96 dropouts"
+- query: "UV luminosity functions z~4-10 from HST legacy fields dropout selection"
+  expected_bibcodes:
+    - "2015ApJ...803...34B"
+  notes: "Bouwens+15"
+- query: "Clustering of high-redshift galaxies and halo mass from Subaru HSC"
+  expected_bibcodes:
+    - "2022ApJS..259...20H"
+    - "2018PASJ...70S..10O"
+  notes: "GOLDRUSH"
+- query: "Galaxy overdensity at z>6 reionized bubble"
+  expected_bibcodes:
+    - "2016ApJ...818L...3C"
+    - "2022MNRAS.511.6042E"
+  notes: "Overdensities at z>6"
+- query: "Faint broad-line AGN at z=4-7 with NIRSpec"
+  expected_bibcodes:
+    - "2023ApJ...959...39H"
+    - "2024ApJ...963..129M"
+  notes: "Harikane+23, Matthee+24"
+- query: "A small and vigorous black hole in the early universe"
+  expected_bibcodes:
+    - "2024Natur.627...59M"
+  notes: "Maiolino+24 GN-z11 AGN"
+- query: "COSMOS-Web survey overview"
+  expected_bibcodes:
+    - "2023ApJ...954...31C"
+  notes: "Casey+23"
+- query: "CEERS early release science first look at early galaxies"
+  expected_bibcodes:
+    - "2023ApJ...946L..13F"
+    - "2022ApJ...940L..55F"
+  notes: "CEERS key papers"
+- query: "FIRE simulations of galaxies in the reionization era"
+  expected_bibcodes:
+    - "2018MNRAS.477..219M"
+  notes: "Ma+18 FIRE-2"
+- query: "THESAN radiation-hydrodynamic simulation of reionization"
+  expected_bibcodes:
+    - "2022MNRAS.511.4005K"
+  notes: "Kannan+22"
+- query: "FLARES simulations of high-redshift galaxies"
+  expected_bibcodes:
+    - "2023MNRAS.519.3118W"
+  notes: "Wilkins+23 FLARES"
+- query: "SPHINX simulations impact of binary stars on reionization"
+  expected_bibcodes:
+    - "2018MNRAS.479..994R"
+  notes: "Rosdahl+18"
+- query: "Galaxy sizes at high redshift with JWST"
+  expected_bibcodes:
+    - "2024MNRAS.527.6110O"
+    - "2024ApJ...963....9M"
+  notes: "Ormerod+24, Morishita+24"
+- query: "Morphologies of galaxies from z=0 to 10 with HST"
+  expected_bibcodes:
+    - "2015ApJS..219...15S"
+  notes: "Shibuya+15"
+- query: "Epoch of reionization end from Lyman-alpha forest opacity fluctuations"
+  expected_bibcodes:
+    - "2019MNRAS.485L..24K"
+    - "2006AJ....132..117F"
+  notes: "Late reionization"

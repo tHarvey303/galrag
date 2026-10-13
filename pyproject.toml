@@ -31,6 +31,7 @@ dependencies = [
   "torch>=2.2",
   "mcp[cli]>=1.2",
   "feedparser>=6.0",
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
