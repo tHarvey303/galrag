@@ -14,10 +14,13 @@ from dataclasses import dataclass
 from rapidfuzz import fuzz
 
 from galrag.models import Document, Paragraph, QuoteMatch, Section
+from galrag.parse.common import sentence_spans
 
 _WS = re.compile(r"\s+")
-_SENT_END = re.compile(r"(?<!\b[A-Z][a-z]{0,3}\.)(?<!\bet al\.)(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bFig\.)"
-                       r"(?<!\bNo\.)(?<!\bvs\.)(?<=[.!?])\s+(?=[A-Z0-9(\[\"'])")
+def _surname(name: str) -> str:
+    """'Bouwens, R. J.' / 'Bouwens RJ' / 'Le Fevre O' -> 'Bouwens' / 'Le Fevre'."""
+    base = name.split(",")[0].strip()
+    return re.sub(r"(\s+[A-Z]{1,3}\.?)+$", "", base).strip() or base
 
 
 def _norm(s: str) -> str:
@@ -32,21 +35,18 @@ def locate_paragraph(doc: Document, char_pos: int) -> tuple[Section, Paragraph] 
 
 
 def split_sentences(text: str) -> list[tuple[int, int]]:
-    """Return (start, end) offsets of sentences inside ``text``."""
-    spans, start = [], 0
-    for m in _SENT_END.finditer(text):
-        spans.append((start, m.start() + 0))
-        start = m.end()
-    spans.append((start, len(text)))
-    return [(a, b) for a, b in spans if text[a:b].strip()]
+    """(start, end) offsets of sentences inside ``text`` (exact offsets)."""
+    return sentence_spans(text)
 
 
-def find_quote(doc: Document, query: str, *, min_similarity: float = 75.0) -> QuoteMatch:
+def find_quote(doc: Document, query: str, *, min_similarity: float = 60.0) -> QuoteMatch:
     """Find ``query`` in ``doc``.
 
     1. exact substring match (whitespace-insensitive);
     2. otherwise the best-matching sentence window by rapidfuzz partial ratio.
-    The returned ``quote`` is always an exact slice of ``doc.full_text``.
+    The returned ``quote`` is always an exact slice of ``doc.full_text``.  When the
+    best candidate scores below ``min_similarity`` it is still returned with
+    ``found=False`` so the caller can see the nearest passage.
     """
     ft = doc.full_text
     q = query.strip()
@@ -66,8 +66,9 @@ def find_quote(doc: Document, query: str, *, min_similarity: float = 75.0) -> Qu
     for s, p in doc.iter_paragraphs():
         if p.kind in ("title",):
             continue
-        sc = fuzz.partial_ratio(_norm(q), _norm(p.text))
-        if sc >= min_similarity - 10:
+        sc = max(fuzz.partial_ratio(_norm(q), _norm(p.text)),
+                 fuzz.partial_token_set_ratio(_norm(q), _norm(p.text)) - 10)
+        if sc >= min_similarity - 15:
             scored.append((sc, s, p))
     scored.sort(key=lambda t: -t[0])
     best: tuple[float, int, int] | None = None
@@ -76,18 +77,22 @@ def find_quote(doc: Document, query: str, *, min_similarity: float = 75.0) -> Qu
         sents = split_sentences(p.text)
         # windows of 1..n_q_sent+1 sentences
         for w in range(1, min(len(sents), n_q_sent + 1) + 1):
-            for i in range(0, len(sents) - w + 1):
+            for i in range(len(sents) - w + 1):
                 a, b = sents[i][0], sents[i + w - 1][1]
                 cand = p.text[a:b]
-                r = fuzz.ratio(_norm(q), _norm(cand))
+                nq, nc = _norm(q), _norm(cand)
+                r = max(fuzz.ratio(nq, nc), 0.5 * (fuzz.token_set_ratio(nq, nc) + fuzz.ratio(nq, nc)))
                 if best is None or r > best[0]:
                     best = (r, p.char_start + a, p.char_start + b)
-    if best and best[0] >= min_similarity:
-        return _match(doc, best[1], best[2], exact=False, similarity=float(best[0]))
+    if best:
+        m = _match(doc, best[1], best[2], exact=False, similarity=float(best[0]))
+        m.found = best[0] >= min_similarity
+        return m
     if scored:
         sc, s, p = scored[0]
-        if sc >= min_similarity:
-            return _match(doc, p.char_start, p.char_end, exact=False, similarity=float(sc))
+        m = _match(doc, p.char_start, p.char_end, exact=False, similarity=float(sc))
+        m.found = sc >= min_similarity
+        return m
     return miss
 
 
@@ -128,17 +133,28 @@ def citation_contexts(doc: Document, bib_keys: set[str] | None = None, *, bibcod
     if first_author and year and not keys:
         fa = first_author.split(",")[0].strip().lower()
         keys |= {b.key for b in doc.bibliography
-                 if b.year == year and (b.first_author or "").split(",")[0].strip().lower() == fa}
+                 if b.year == year and _surname(b.first_author or "").lower() == _surname(first_author).lower()}
+    # Textual fallback (PDF-derived text, or HTML without \cite links): look for
+    # "Surname et al. YEAR" / "Surname YEAR" when no marker in the document points at ``keys``.
+    if not first_author or not year:
+        for b in doc.bibliography:
+            if b.key in keys and b.first_author and b.year:
+                first_author, year = b.first_author, b.year
+                break
+    has_markers = any(keys & set(c.bib_keys) for _, p in doc.iter_paragraphs() for c in p.cites)
+    pat = None
+    if not has_markers and first_author and year:
+        fa = re.escape(_surname(first_author))
+        pat = re.compile(
+            rf"\b{fa}\b(?:\s*,?\s*(?:et\s+al\.?|(?:&|and)\s+[A-Z][\w'-]+))?\s*,?\s*\(?{year}[a-z]?\)?",
+            re.IGNORECASE)
     out: list[CitationContext] = []
     seen: set[tuple[int, int]] = set()
     for s, p in doc.iter_paragraphs():
         hits = [c for c in p.cites if keys & set(c.bib_keys)]
-        if not hits and first_author and year and not doc.bibliography:
-            fa = re.escape(first_author.split(",")[0].strip())
-            pat = re.compile(rf"\b{fa}\b[^.;()]{{0,40}}?\(?{year}\)?", re.I)
-            hits = [m for m in pat.finditer(p.text)]
+        if not hits and pat is not None:
             hits = [type("M", (), {"char_start": p.char_start + m.start(), "char_end": p.char_start + m.end(),
-                                   "text": m.group(0)})() for m in hits]
+                                   "text": m.group(0)})() for m in pat.finditer(p.text)]
         if not hits:
             continue
         sents = split_sentences(p.text)

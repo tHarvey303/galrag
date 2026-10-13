@@ -10,9 +10,8 @@ from __future__ import annotations
 import logging
 import signal
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
-from galrag.config import get_settings
 from galrag.db import Database
 from galrag.fetch import FetchError, fetch_fulltext
 from galrag.models import PaperMeta, Status
@@ -50,7 +49,7 @@ def fetch_and_parse_one(db: Database, meta: PaperMeta, *, force: bool = False) -
         doc = parse_fetched(res, meta)
         n_res = resolve_bibliography(doc, db, meta)
         save_document(doc)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         db.set_status(meta.paper_key, Status.FAILED_PARSE, source=res.source, error=repr(e)[:500])
         raise
     db.set_status(meta.paper_key, Status.PARSED, source=res.source)
@@ -65,21 +64,19 @@ def run_fetch_parse(db: Database, *, tiers: Iterable[str] = ("A", "B"), limit: i
     stop = _Stop()
     counts: dict[str, int] = {"ok": 0, "fetch_failed": 0, "parse_failed": 0}
     if paper_keys:
-        rows = [db.get_row(k) for k in paper_keys]
-        rows = [r for r in rows if r is not None]
+        keys = [k for k in paper_keys if db.get_row(k) is not None]
     else:
         statuses = [Status.METADATA] + ([Status.FAILED_FETCH, Status.FAILED_PARSE] if retry_failed else [])
-        rows = []
-        for st in statuses:
-            rows.extend(db.iter_by_status(st, tiers=tiers, limit=limit))
-        rows.sort(key=lambda r: -r["priority"])
-        if limit:
-            rows = rows[:limit]
+        keys = [k for k, _ in db.iter_keys_by_status(statuses, tiers=tiers, limit=limit)]
+    rows = keys
     log.info("fetch/parse queue: %d papers (tiers=%s)", len(rows), list(tiers))
     t0 = time.time()
-    for i, row in enumerate(rows, 1):
+    for i, key in enumerate(rows, 1):
         if stop.flag:
             break
+        row = db.get_row(key)
+        if row is None:
+            continue
         meta = PaperMeta.model_validate_json(row["meta_json"])
         if row["status"] in (Status.PARSED, Status.CHUNKED, Status.EMBEDDED) and not paper_keys:
             continue
@@ -89,7 +86,7 @@ def run_fetch_parse(db: Database, *, tiers: Iterable[str] = ("A", "B"), limit: i
         except FetchError as e:
             counts["fetch_failed"] += 1
             log.warning("fetch failed %s: %s", meta.paper_key, str(e)[:200])
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             counts["parse_failed"] += 1
             log.exception("parse failed %s: %r", meta.paper_key, e)
         if i % 50 == 0:

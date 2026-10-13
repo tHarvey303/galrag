@@ -14,13 +14,12 @@ runs          harvest/update bookkeeping (last entdate seen, counts)
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable, Iterator
 
 from galrag.config import get_settings
 from galrag.models import PaperMeta, Status, Tier
@@ -28,6 +27,8 @@ from galrag.models import PaperMeta, Status, Tier
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
+PRAGMA cache_size=-262144;
+PRAGMA temp_store=MEMORY;
 CREATE TABLE IF NOT EXISTS papers (
     paper_key      TEXT PRIMARY KEY,
     bibcode        TEXT UNIQUE,
@@ -56,6 +57,8 @@ CREATE INDEX IF NOT EXISTS idx_papers_status ON papers(status);
 CREATE INDEX IF NOT EXISTS idx_papers_tier_priority ON papers(tier, priority DESC);
 CREATE INDEX IF NOT EXISTS idx_papers_arxiv ON papers(arxiv_id);
 CREATE INDEX IF NOT EXISTS idx_papers_year ON papers(year);
+-- covering index: queue queries read only index pages (NFS round trips are expensive)
+CREATE INDEX IF NOT EXISTS idx_papers_queue ON papers(status, tier, priority DESC, paper_key);
 CREATE TABLE IF NOT EXISTS identifiers (
     ident      TEXT PRIMARY KEY,         -- normalised (lower-case, no arXiv version)
     paper_key  TEXT NOT NULL REFERENCES papers(paper_key) ON DELETE CASCADE
@@ -88,7 +91,7 @@ _ARXIV_OLD = re.compile(r"([a-z\-]+(?:\.[A-Z]{2})?/\d{7})(v\d+)?$")
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def normalise_arxiv_id(s: str) -> str | None:
@@ -96,7 +99,7 @@ def normalise_arxiv_id(s: str) -> str | None:
     if not s:
         return None
     s = s.strip()
-    s = re.sub(r"^(arxiv:|https?://arxiv\.org/(abs|pdf|html)/)", "", s, flags=re.I)
+    s = re.sub(r"^(arxiv:|https?://arxiv\.org/(abs|pdf|html)/)", "", s, flags=re.IGNORECASE)
     s = s.removesuffix(".pdf")
     m = _ARXIV_NEW.search(s) or _ARXIV_OLD.search(s)
     return m.group(1) if m else None
@@ -242,6 +245,24 @@ class Database:
         if limit:
             q += f" LIMIT {int(limit)}"
         yield from self.conn.execute(q, vals)
+
+    def iter_keys_by_status(self, statuses: Iterable[Status | str], *, tiers: Iterable[str] | None = None,
+                            limit: int | None = None) -> list[tuple[str, float]]:
+        """(paper_key, priority) for the given statuses, highest priority first.
+
+        Reads only small columns, so it avoids touching the large ``meta_json`` overflow
+        pages (important on network filesystems)."""
+        statuses = [str(x) for x in statuses]
+        q = f"SELECT paper_key, priority FROM papers WHERE status IN ({','.join('?' * len(statuses))})"
+        vals: list = statuses
+        if tiers:
+            tiers = list(tiers)
+            q += f" AND tier IN ({','.join('?' * len(tiers))})"
+            vals += tiers
+        q += " ORDER BY priority DESC"
+        if limit:
+            q += f" LIMIT {int(limit)}"
+        return [(r[0], r[1]) for r in self.conn.execute(q, vals)]
 
     def count_by_status(self) -> dict[str, int]:
         return {r[0]: r[1] for r in self.conn.execute("SELECT status, COUNT(*) FROM papers GROUP BY status")}
