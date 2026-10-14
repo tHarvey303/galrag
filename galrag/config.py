@@ -72,8 +72,8 @@ class Settings(BaseSettings):
     embed_model: str = "BAAI/bge-base-en-v1.5"
     embed_query_prefix: str = "Represent this sentence for searching relevant passages: "
     embed_batch_size: int = 64
-    embed_workers: int = 16          # processes (many small workers beat one big one on this node)
-    embed_threads_per_worker: int = 8
+    embed_workers: int = 2           # processes; this shared node gives one session ~3 cores, so keep it lean
+    embed_threads_per_worker: int = 4   # raise both (e.g. 12x8) on a quiet machine
     rerank_model: str = "BAAI/bge-reranker-base"
     rerank_enabled: bool = True
     rerank_top_n: int = 50
