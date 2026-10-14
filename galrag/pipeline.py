@@ -88,7 +88,7 @@ def run_fetch_parse(db: Database, *, tiers: Iterable[str] = ("A", "B"), limit: i
             log.warning("fetch failed %s: %s", meta.paper_key, str(e)[:200])
         except Exception as e:
             counts["parse_failed"] += 1
-            log.exception("parse failed %s: %r", meta.paper_key, e)
+            log.exception("parse failed %s", meta.paper_key)
         if i % 50 == 0:
             rate = i / (time.time() - t0)
             log.info("progress %d/%d (%.2f papers/s) %s", i, len(rows), rate, counts)
