@@ -100,7 +100,8 @@ def iter_parsed_without_embedding(db: Database, limit: int | None = None,
                                   paper_keys: Iterable[str] | None = None):
     """Yield (meta, Document) for papers that are parsed but not yet in the vector store."""
     if paper_keys:
-        rows = [r for r in (db.get_row(k) for k in paper_keys) if r is not None]
+        rows = [r for r in (db.get_row(k) for k in paper_keys)
+                if r is not None and r["status"] in (Status.PARSED, Status.EMBEDDED, Status.FAILED_EMBED)]
     else:
         rows = db.iter_by_status(Status.PARSED, limit=limit)
     for row in rows:

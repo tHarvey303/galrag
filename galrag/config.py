@@ -26,7 +26,7 @@ TOPIC_QUERY = f"collection:astronomy AND abs:(galaxy OR galaxies) AND abs:({TOPI
 # Fields requested from ADS for every record.  ``reference`` is the cited-bibcode list.
 ADS_FIELDS = [
     "bibcode", "alternate_bibcode", "title", "author", "first_author", "year", "pubdate",
-    "entdate", "abstract", "doi", "identifier", "arxiv_class", "keyword", "bibstem", "pub",
+    "entry_date", "abstract", "doi", "identifier", "arxiv_class", "keyword", "bibstem", "pub",
     "volume", "page", "doctype", "property", "esources", "citation_count", "read_count",
     "reference",
 ]

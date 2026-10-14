@@ -400,7 +400,7 @@ def meta_from_ads(doc: dict) -> PaperMeta:
         first_author=doc.get("first_author") or "",
         year=year,
         pubdate=doc.get("pubdate"),
-        entdate=doc.get("entdate"),
+        entdate=doc.get("entry_date") or doc.get("entdate"),
         abstract=doc.get("abstract") or "",
         keywords=doc.get("keyword", []) or [],
         arxiv_class=doc.get("arxiv_class", []) or [],
