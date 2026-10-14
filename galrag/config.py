@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # ``work_dir`` is machine-local scratch for hot I/O: the live SQLite and the raw
     # HTML/PDF cache.  Unset = everything lives in ``data_dir`` (single-machine layout).
     work_dir: Path | None = Field(default=None, description="Local scratch dir (GALRAG_WORK_DIR)")
+    raw_archive_mb: int = 500        # tar the local raw cache to data_dir/raw_archive once it exceeds this
     # Explicit LanceDB location (GALRAG_LANCEDB_DIR), e.g. local disk on the GPU machine.
     lancedb_dir_override: Path | None = Field(default=None, validation_alias="GALRAG_LANCEDB_DIR")
 
@@ -118,6 +119,11 @@ class Settings(BaseSettings):
     @property
     def lancedb_dir(self) -> Path:
         return self.lancedb_dir_override or self.archive_lancedb_dir
+
+    @property
+    def raw_archive_dir(self) -> Path:
+        """Where :func:`galrag.sync.archive_raw` puts tarballs of the raw cache (on Nexus)."""
+        return self.data_dir / "raw_archive"
 
     @property
     def archive_lancedb_dir(self) -> Path:

@@ -67,6 +67,21 @@ def _print_counts(title: str, d: dict) -> None:
 
 
 # ------------------------------------------------------------------ ADS
+@app.command("archive-raw")
+def archive_raw_cmd(
+    source: Annotated[Path | None, typer.Option(help="Directory to archive (default: the raw cache).")] = None,
+    min_mb: Annotated[float, typer.Option(help="Only archive if at least this many MB (0 = always).")] = 0,
+    min_age_s: Annotated[float, typer.Option(help="Skip files modified less than this many seconds ago.")] = 600,
+    keep: Annotated[bool, typer.Option("--keep", help="Keep the local files after archiving.")] = False,
+):
+    """Tar the raw HTML/PDF cache into data_dir/raw_archive (bulk move to Nexus)."""
+    from galrag.config import get_settings
+    from galrag.sync import archive_raw
+
+    res = archive_raw(get_settings(), source=source, min_mb=min_mb, min_age_s=min_age_s, delete=not keep)
+    console.print(res)
+
+
 @app.command()
 def harvest(
     query: Annotated[str | None, typer.Option(help="ADS query (default: settings.topic_query).")] = None,

@@ -19,8 +19,10 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import tarfile
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +93,7 @@ def _which(only: str | None) -> tuple[bool, bool]:
     return only == "sqlite", only == "lancedb"
 
 
-def push(settings: Settings, *, sqlite: bool = True, lancedb: bool = True) -> dict[str, Any]:
+def push(settings: Settings, *, sqlite: bool = True, lancedb: bool = True, raw: bool = True) -> dict[str, Any]:
     """Copy local results to the archive in ``data_dir``.  Returns what was synced."""
     out: dict[str, Any] = {}
     if sqlite:
@@ -113,6 +115,12 @@ def push(settings: Settings, *, sqlite: bool = True, lancedb: bool = True) -> di
             how = copy_tree(src, dst)
             out["lancedb"] = {"from": str(src), "to": str(dst), "method": how, "bytes": _size(dst),
                               "seconds": round(time.time() - t0, 1)}
+    if raw and settings.work_dir:
+        try:
+            out.update(archive_raw(settings))
+        except Exception:
+            log.exception("raw archive failed")
+            out["raw"] = "failed (see log)"
     log.info("sync push: %s", out)
     return out
 
@@ -147,6 +155,53 @@ def pull(settings: Settings, *, sqlite: bool = True, lancedb: bool = True, force
             out["lancedb"] = {"from": str(src), "to": str(dst), "method": how, "bytes": _size(dst),
                               "seconds": round(time.time() - t0, 1)}
     log.info("sync pull: %s", out)
+    return out
+
+
+def archive_raw(settings: Settings, *, source: Path | None = None, min_mb: float | None = None,
+                min_age_s: float = 600.0, delete: bool = True) -> dict[str, Any]:
+    """Move the raw HTML/PDF cache to Nexus **in bulk**: one tarball per call under
+    ``settings.raw_archive_dir`` (``raw-<UTC stamp>.tar``), then delete the local files.
+
+    Only files older than ``min_age_s`` are taken (a fetch may still be writing), and
+    nothing happens below ``min_mb`` MB (default ``settings.raw_archive_mb``) unless
+    ``min_mb=0``.  The raw cache is only needed to re-parse without re-fetching, so the
+    tarballs are a cold archive; ``tar -xf`` them into ``raw_dir`` to restore.
+    """
+    src = Path(source or settings.raw_dir)
+    thresh = settings.raw_archive_mb if min_mb is None else min_mb
+    if not src.exists():
+        return {"raw": f"skipped ({src} does not exist)"}
+    now = time.time()
+    files = [f for f in src.rglob("*") if f.is_file() and now - f.stat().st_mtime >= min_age_s]
+    total = sum(f.stat().st_size for f in files)
+    if not files or total < thresh * 1e6:
+        return {"raw": f"skipped ({len(files)} files, {total / 1e6:.0f} MB < {thresh} MB)"}
+    dest_dir = settings.raw_archive_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    tmp = dest_dir / f"raw-{stamp}.tar.tmp"
+    final = dest_dir / f"raw-{stamp}.tar"
+    t0 = time.time()
+    with tarfile.open(tmp, "w") as tar:  # files are already gzipped; no recompression
+        for f in files:
+            tar.add(f, arcname=str(f.relative_to(src)))
+    with tarfile.open(tmp) as tar:  # verify before deleting anything
+        names = set(tar.getnames())
+    missing = [f for f in files if str(f.relative_to(src)) not in names]
+    if missing:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"raw archive verification failed: {len(missing)} files missing")
+    os.replace(tmp, final)
+    if delete:
+        for f in files:
+            f.unlink(missing_ok=True)
+        for d in sorted((d for d in src.rglob("*") if d.is_dir()), reverse=True):
+            if not any(d.iterdir()):
+                d.rmdir()
+    out = {"raw": {"files": len(files), "bytes": total, "tar": str(final), "deleted_local": delete,
+                   "seconds": round(time.time() - t0, 1)}}
+    log.info("raw archive: %s", out)
     return out
 
 

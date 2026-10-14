@@ -269,3 +269,23 @@ def test_store_key_scans(tmp_path):
     assert store.fulltext_paper_keys() == {"A"}
     assert store.paper_vec_keys() == {"A", "B"}
     assert store.chunk_counts_by_paper() == {"A": (2, 0), "B": (0, 1)}
+
+
+def test_archive_raw_tar_and_delete(tmp_path):
+    import tarfile
+
+    from galrag.config import Settings
+    from galrag.sync import archive_raw
+
+    data, work = tmp_path / "data", tmp_path / "work"
+    s = Settings(ads_token="x", data_dir=data, work_dir=work)
+    raw = s.raw_dir / "html"
+    raw.mkdir(parents=True)
+    for i in range(3):
+        (raw / f"p{i}.html.gz").write_bytes(b"x" * 1000)
+    assert "skipped" in archive_raw(s, min_age_s=0)["raw"]  # below the size threshold
+    res = archive_raw(s, min_mb=0, min_age_s=0)["raw"]
+    assert res["files"] == 3 and not list(raw.glob("*"))
+    with tarfile.open(res["tar"]) as t:
+        assert sorted(t.getnames()) == [f"html/p{i}.html.gz" for i in range(3)]
+    assert "skipped" in archive_raw(s, min_mb=0, min_age_s=0)["raw"]
