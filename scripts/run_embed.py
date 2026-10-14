@@ -41,14 +41,17 @@ def main() -> None:
     with PoolEmbedder(n_workers=a.workers, threads_per_worker=a.threads) as emb:
         while True:
             t0 = time.time()
-            if not a.no_abstracts:
-                log.info("abstracts: %s", run_embed_abstracts(db, store, emb, limit=a.limit))
-            res = run_embed(db, store, emb, limit=a.limit)
-            log.info("fulltext: %s", res)
-            if res["papers"]:
-                log.info("indexes: %s", store.create_indexes())
-                store.refresh_indexes()
-            log.info("pass done in %.0fs; store has %d chunks", time.time() - t0, store.count())
+            try:
+                if not a.no_abstracts:
+                    log.info("abstracts: %s", run_embed_abstracts(db, store, emb, limit=a.limit))
+                res = run_embed(db, store, emb, limit=a.limit)
+                log.info("fulltext: %s", res)
+                if res["papers"]:
+                    log.info("indexes: %s", store.create_indexes())
+                    store.refresh_indexes()
+                log.info("pass done in %.0fs; store has %d chunks", time.time() - t0, store.count())
+            except Exception:
+                log.exception("pass failed; retrying after %ds", a.interval)
             if not a.loop:
                 break
             time.sleep(a.interval)

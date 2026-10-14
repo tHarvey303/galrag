@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -131,7 +132,7 @@ class Database:
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else get_settings().sqlite_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path, timeout=60, isolation_level=None)
+        self.conn = sqlite3.connect(self.path, timeout=600, isolation_level=None)  # NFS locks can stall
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.migrate()
@@ -258,7 +259,18 @@ class Database:
         if n_chunks is not None:
             sets.append("n_chunks=?"); vals.append(n_chunks)
         vals.append(paper_key)
-        self.conn.execute(f"UPDATE papers SET {', '.join(sets)} WHERE paper_key=?", vals)
+        self._execute_retry(f"UPDATE papers SET {', '.join(sets)} WHERE paper_key=?", vals)
+
+    def _execute_retry(self, sql: str, vals, *, attempts: int = 6) -> None:
+        """Execute a write, retrying on 'database is locked' (NFS lock stalls)."""
+        for i in range(attempts):
+            try:
+                self.conn.execute(sql, vals)
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e) or i == attempts - 1:
+                    raise
+                time.sleep(5 * (i + 1))
 
     def iter_by_status(self, status: Status | str, *, tiers: Iterable[str] | None = None,
                        limit: int | None = None, order: str = "priority DESC") -> Iterator[sqlite3.Row]:
