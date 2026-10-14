@@ -18,11 +18,12 @@ exact text.  This is the basis for verifiable quotes.
 
 from __future__ import annotations
 
+import html
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 FullTextSource = Literal["arxiv_html", "ar5iv", "arxiv_pdf", "pub_pdf", "abstract_only"]
 ParagraphKind = Literal["title", "abstract", "body", "caption", "footnote", "equation", "list"]
@@ -77,6 +78,12 @@ class PaperMeta(BaseModel):
     tier: Tier = Tier.C
     priority: float = 0.0
     raw: dict = Field(default_factory=dict)                 # the untouched ADS doc
+
+    @field_validator("title", "abstract", mode="before")
+    @classmethod
+    def _unescape_html(cls, v):
+        # ADS returns HTML entities (e.g. "z &gt; 8") in titles and abstracts
+        return html.unescape(v) if isinstance(v, str) and "&" in v else v
 
 
 class CiteMarker(BaseModel):
