@@ -241,7 +241,7 @@ class Database:
         yield from self.conn.execute(q)
 
     def mark_paper_vec(self, keys: Iterable[str], *, abs_chunk_keys: Iterable[str] = ()) -> None:
-        with self.conn:
+        with self.tx():  # one transaction: autocommit mode would fsync per row (slow on NFS)
             self.conn.executemany("UPDATE papers SET paper_vec=1 WHERE paper_key=?", [(k,) for k in keys])
             self.conn.executemany("UPDATE papers SET abs_chunk=1 WHERE paper_key=?",
                                   [(k,) for k in abs_chunk_keys])
