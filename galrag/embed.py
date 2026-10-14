@@ -11,6 +11,26 @@ import numpy as np
 from galrag.config import Settings, get_settings
 
 
+def resolve_device(settings: Settings | None = None) -> str:
+    """'auto' -> 'cuda' when a GPU is visible to torch, else 'cpu'."""
+    s = settings or get_settings()
+    dev = (s.embed_device or "auto").lower()
+    if dev != "auto":
+        return dev
+    import torch
+
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _load_st(model_name: str, device: str, fp16: bool):
+    from sentence_transformers import SentenceTransformer
+
+    m = SentenceTransformer(model_name, device=device)
+    if device.startswith("cuda") and fp16:
+        m.half()
+    return m
+
+
 def _set_threads(n: int) -> None:
     import torch
 
@@ -27,6 +47,7 @@ class Embedder:
     def __init__(self, settings: Settings | None = None, threads: int | None = None):
         self.settings = settings or get_settings()
         self.threads = threads if threads is not None else self.settings.embed_threads_per_worker
+        self.device = resolve_device(self.settings)
         self._model = None
         self._lock = threading.Lock()
 
@@ -36,11 +57,14 @@ class Embedder:
             with self._lock:
                 if self._model is None:
                     get_settings()  # ensure HF_HOME is set
-                    _set_threads(self.threads)
-                    from sentence_transformers import SentenceTransformer
-
-                    self._model = SentenceTransformer(self.settings.embed_model, device="cpu")
+                    if self.device == "cpu":
+                        _set_threads(self.threads)
+                    self._model = _load_st(self.settings.embed_model, self.device, self.settings.embed_fp16)
         return self._model
+
+    @property
+    def default_batch_size(self) -> int:
+        return self.settings.embed_batch_size_gpu if self.device != "cpu" else self.settings.embed_batch_size
 
     @property
     def dim(self) -> int:
@@ -49,7 +73,7 @@ class Embedder:
     def embed_passages(self, texts: Sequence[str], batch_size: int | None = None) -> np.ndarray:
         if len(texts) == 0:
             return np.zeros((0, self.dim), dtype=np.float32)
-        v = self.model.encode(list(texts), batch_size=batch_size or self.settings.embed_batch_size,
+        v = self.model.encode(list(texts), batch_size=batch_size or self.default_batch_size,
                               normalize_embeddings=True, convert_to_numpy=True,
                               show_progress_bar=False)
         return np.asarray(v, dtype=np.float32)
@@ -94,9 +118,11 @@ class PoolEmbedder:
                  settings: Settings | None = None):
         s = settings or get_settings()
         self.settings = s
-        self.n_workers = max(1, n_workers or s.embed_workers)
+        self.device = resolve_device(s)
+        # a GPU is served by one process; worker processes only make sense on CPU
+        self.n_workers = 1 if self.device != "cpu" else max(1, n_workers or s.embed_workers)
         self.threads = threads_per_worker or s.embed_threads_per_worker
-        self.batch_size = batch_size or s.embed_batch_size
+        self.batch_size = batch_size or (s.embed_batch_size_gpu if self.device != "cpu" else s.embed_batch_size)
         self.shard_size = shard_size or self.batch_size * 4
         self._pool = None
         self._local: Embedder | None = None
@@ -159,10 +185,12 @@ class Reranker:
     def model(self):
         if self._model is None:
             get_settings()
-            _set_threads(self.threads)
+            device = resolve_device(self.settings)
+            if device == "cpu":
+                _set_threads(self.threads)
             from sentence_transformers import CrossEncoder
 
-            self._model = CrossEncoder(self.settings.rerank_model, device="cpu")
+            self._model = CrossEncoder(self.settings.rerank_model, device=device)
         return self._model
 
     def rerank(self, query: str, passages: Sequence[str]) -> list[float]:
