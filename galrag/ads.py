@@ -5,12 +5,11 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Iterator
 from datetime import date, datetime, timedelta
-from typing import Iterator
 
 import httpx
-from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
-                      wait_exponential)
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from galrag.config import ADS_FIELDS, get_settings
 from galrag.db import Database, meta_from_ads, normalise_arxiv_id
@@ -148,8 +147,7 @@ class ADSClient:
             total = resp["numFound"]
             if start == 0:
                 log.info("ADS query matched %d records", total)
-            for d in docs:
-                yield d
+            yield from docs
             got += len(docs)
             start += len(docs)
             log.info("ADS fetched %d / %d (rate-limit remaining %s)", got, total, self.remaining)
@@ -214,7 +212,7 @@ class ADSClient:
             for doc in self.search(q, fq=fq, max_records=max_records, sort="date desc"):
                 try:
                     batch.append(meta_from_ads(doc))
-                except Exception as e:  # malformed record: skip, keep going
+                except Exception as e:  # noqa: BLE001  (malformed record: skip, keep going)
                     log.warning("Skipping %s: %s", doc.get("bibcode"), e)
                 if len(batch) >= 2000:
                     a, b = db.upsert_papers(batch)
@@ -241,7 +239,7 @@ class ADSClient:
 
 
 # ------------------------------------------------------------------ helpers
-_ENTRY = re.compile(r"^@\w+\s*\{\s*([^,\s]+)\s*,", re.M)
+_ENTRY = re.compile(r"^@\w+\s*\{\s*([^,\s]+)\s*,", re.MULTILINE)
 
 
 def split_bibtex(export: str) -> dict[str, str]:
@@ -277,8 +275,8 @@ def get_bibtex_cached(db: Database, bibcodes: list[str], client: ADSClient | Non
     return out
 
 
-_ARXIV_RE = re.compile(r"(?:arxiv:\s*)?\b(\d{4}\.\d{4,5})(?:v\d+)?\b|\b([a-z\-]+(?:\.[A-Z]{2})?/\d{7})\b", re.I)
-_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>]+)", re.I)
+_ARXIV_RE = re.compile(r"(?:arxiv:\s*)?\b(\d{4}\.\d{4,5})(?:v\d+)?\b|\b([a-z\-]+(?:\.[A-Z]{2})?/\d{7})\b", re.IGNORECASE)
+_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>]+)", re.IGNORECASE)
 _BIBCODE_RE = re.compile(r"\b(\d{4}[A-Za-z&.]{2,9}[.\d]{4,5}[A-Za-z0-9.]{4}[A-Z.])\b")
 _STOP = {"et", "al", "al.", "and", "the", "of", "in", "a", "on", "for", "with", "to", "by"}
 _JOURNALS = {"apj", "apjl", "apjs", "aj", "mnras", "a&a", "aap", "nature", "science", "natastron",
@@ -330,7 +328,7 @@ def build_citation_query(text: str) -> tuple[str | None, str]:
         if ym:
             year = int(ym.group(1))
             t = t[:ym.start()] + " " + t[ym.end():]
-    t = re.sub(r"\bet\.?\s*al\.?", " ", t, flags=re.I)
+    t = re.sub(r"\bet\.?\s*al\.?", " ", t, flags=re.IGNORECASE)
     t = re.sub(r"[(),;]", " ", t)
     tokens = [w for w in t.split() if w]
     tokens = [w for w in tokens if w.lower().strip(".") not in _JOURNALS]

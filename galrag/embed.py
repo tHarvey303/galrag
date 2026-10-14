@@ -82,31 +82,69 @@ def _worker_encode(args) -> np.ndarray:
     return np.asarray(v, dtype=np.float32)
 
 
+class PoolEmbedder:
+    """Persistent pool of ``n_workers`` spawned processes, each holding one model.
+
+    Use as a context manager when embedding many batches: worker start-up (spawn +
+    model load) is paid once instead of per call.  Order of outputs is preserved.
+    """
+
+    def __init__(self, n_workers: int | None = None, threads_per_worker: int | None = None,
+                 batch_size: int | None = None, shard_size: int | None = None,
+                 settings: Settings | None = None):
+        s = settings or get_settings()
+        self.settings = s
+        self.n_workers = max(1, n_workers or s.embed_workers)
+        self.threads = threads_per_worker or s.embed_threads_per_worker
+        self.batch_size = batch_size or s.embed_batch_size
+        self.shard_size = shard_size or self.batch_size * 4
+        self._pool = None
+        self._local: Embedder | None = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def _ensure(self):
+        if self.n_workers == 1:
+            if self._local is None:
+                self._local = Embedder(self.settings, threads=self.threads)
+            return
+        if self._pool is None:
+            import multiprocessing as mp
+
+            ctx = mp.get_context("spawn")
+            hf_home = os.environ.get("HF_HOME", str(self.settings.models_dir))
+            self._pool = ctx.Pool(self.n_workers, initializer=_worker_init,
+                                  initargs=(self.settings.embed_model, self.threads, hf_home))
+
+    def embed_passages(self, texts: Sequence[str]) -> np.ndarray:
+        texts = list(texts)
+        if not texts:
+            return np.zeros((0, 768), dtype=np.float32)
+        self._ensure()
+        if self._local is not None:
+            return self._local.embed_passages(texts, batch_size=self.batch_size)
+        shard = self.shard_size
+        shards = [(texts[i:i + shard], self.batch_size) for i in range(0, len(texts), shard)]
+        parts = list(self._pool.imap(_worker_encode, shards))  # imap preserves order
+        return np.concatenate(parts, axis=0)
+
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.close()
+            self._pool.join()
+            self._pool = None
+
+
 def embed_parallel(texts: Sequence[str], n_workers: int | None = None,
                    threads_per_worker: int | None = None, batch_size: int | None = None,
                    shard_size: int | None = None, settings: Settings | None = None) -> np.ndarray:
-    """Embed ``texts`` with ``n_workers`` spawned processes (order preserved).
-
-    Each worker loads the model once.  Texts are cut into contiguous shards of
-    ``shard_size`` (default 8 batches) handed out dynamically.
-    """
-    import multiprocessing as mp
-
-    s = settings or get_settings()
-    n_workers = n_workers or s.embed_workers
-    threads = threads_per_worker or s.embed_threads_per_worker
-    bs = batch_size or s.embed_batch_size
-    texts = list(texts)
-    if not texts:
-        return np.zeros((0, 768), dtype=np.float32)
-    shard = shard_size or bs * 8
-    shards = [(texts[i:i + shard], bs) for i in range(0, len(texts), shard)]
-    n_workers = max(1, min(n_workers, len(shards)))
-    ctx = mp.get_context("spawn")
-    with ctx.Pool(n_workers, initializer=_worker_init,
-                  initargs=(s.embed_model, threads, os.environ.get("HF_HOME", str(s.models_dir)))) as pool:
-        parts = list(pool.imap(_worker_encode, shards))  # imap preserves order
-    return np.concatenate(parts, axis=0)
+    """One-shot parallel embedding (spawns and tears down a :class:`PoolEmbedder`)."""
+    with PoolEmbedder(n_workers, threads_per_worker, batch_size, shard_size, settings) as pe:
+        return pe.embed_passages(texts)
 
 
 class Reranker:

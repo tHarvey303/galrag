@@ -20,6 +20,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from galrag.config import get_settings
 from galrag.models import PaperMeta, Status, Tier
@@ -133,6 +134,7 @@ class Database:
         self.conn = sqlite3.connect(self.path, timeout=60, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self.migrate()
 
     def close(self) -> None:
         self.conn.close()
@@ -218,6 +220,31 @@ class Database:
 
     def get_row(self, paper_key: str) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM papers WHERE paper_key=?", (paper_key,)).fetchone()
+
+    # -- schema migrations (columns added after the first harvest) -------------
+    MIGRATIONS: ClassVar[dict[str, str]] = {
+        "paper_vec": "INTEGER NOT NULL DEFAULT 0",   # title+abstract vector in papers table
+        "abs_chunk": "INTEGER NOT NULL DEFAULT 0",   # abstract-only chunk in chunks table
+    }
+
+    def migrate(self) -> None:
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(papers)")}
+        for col, decl in self.MIGRATIONS.items():
+            if col not in cols:
+                self.conn.execute(f"ALTER TABLE papers ADD COLUMN {col} {decl}")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_papers_paper_vec ON papers(paper_vec, priority DESC)")
+
+    def iter_without_paper_vec(self, *, limit: int | None = None) -> Iterator[sqlite3.Row]:
+        q = "SELECT * FROM papers WHERE paper_vec=0 ORDER BY priority DESC"
+        if limit:
+            q += f" LIMIT {int(limit)}"
+        yield from self.conn.execute(q)
+
+    def mark_paper_vec(self, keys: Iterable[str], *, abs_chunk_keys: Iterable[str] = ()) -> None:
+        with self.conn:
+            self.conn.executemany("UPDATE papers SET paper_vec=1 WHERE paper_key=?", [(k,) for k in keys])
+            self.conn.executemany("UPDATE papers SET abs_chunk=1 WHERE paper_key=?",
+                                  [(k,) for k in abs_chunk_keys])
 
     def set_status(self, paper_key: str, status: Status | str, *, source: str | None = None,
                    error: str | None = None, n_chunks: int | None = None) -> None:
