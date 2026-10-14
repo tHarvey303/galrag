@@ -240,7 +240,7 @@ def quote(paper: Annotated[str, typer.Argument(help="Paper identifier.")],
     if key is None:
         console.print(f"[red]unknown paper {paper!r}")
         raise typer.Exit(1)
-    doc = load_document(key)
+    doc = load_document(key, db)
     if doc is None:
         console.print(f"[red]no full text for {key}")
         raise typer.Exit(1)
@@ -274,7 +274,7 @@ def paper(ident: Annotated[str, typer.Argument()]) -> None:
                   ("source", row["source"]), ("n_chunks", row["n_chunks"]), ("error", row["error"])]:
         t.add_row(k_, str(v))
     console.print(t)
-    doc = load_document(key)
+    doc = load_document(key, db)
     if doc is not None:
         console.print(f"[bold]sections[/] ({len(doc.full_text):,} chars, {len(doc.bibliography)} bib entries, "
                       f"flags {doc.quality_flags})")
@@ -290,7 +290,9 @@ def stats(disk: Annotated[bool, typer.Option("--disk/--no-disk", help="Measure d
     s = corpus_stats(_db(), disk=disk)
     console.print(f"[bold]data dir:[/] {s['data_dir']}   papers: {s['papers_total']:,}   "
                   f"paper vectors: {s['with_paper_vector']:,}   chunks in LanceDB: {s['vector_chunks']}   "
-                  f"docs on disk: {s['docs_on_disk']:,}")
+                  f"documents: {s['documents']:,}")
+    console.print(f"[bold]sqlite:[/] {s['sqlite_path']}   [bold]lancedb:[/] {s['lancedb_dir']}"
+                  + (f"   [bold]work dir:[/] {s['work_dir']}" if s["work_dir"] else ""), highlight=False)
     _print_counts("by status", s["by_status"])
     _print_counts("by tier", s["by_tier"])
     if s["fulltext_embedded_by_tier"]:
@@ -340,6 +342,83 @@ def eval_(
                               for k_, v in res["summary"].items()})
     if json_out:
         json_out.write_text(json.dumps(res, indent=1, default=str))
+
+
+# ------------------------------------------------------------------ storage
+@app.command(name="migrate-docs")
+def migrate_docs(
+    docs_dir: Annotated[Path | None, typer.Option("--docs-dir",
+                                                  help="Legacy JSON dir (default <data_dir>/docs).")] = None,
+    delete_files: Annotated[bool, typer.Option("--delete-files",
+                                               help="Delete each JSON file once its document is in SQLite.")] = False,
+) -> None:
+    """Import legacy docs/*.json[.gz] files into the SQLite documents table."""
+    from galrag.config import get_settings
+
+    db = _db()
+    d = docs_dir or get_settings().docs_dir
+    t0 = time.time()
+    n = db.import_document_files(d)
+    total = db.count_documents()
+    console.print(f"[bold]migrate-docs:[/] imported {n:,} from {d}; documents table now holds {total:,} "
+                  f"({time.time() - t0:.0f} s)", highlight=False)
+    if delete_files and d.is_dir():
+        from galrag.parse import fs_safe
+
+        removed = 0
+        for key in db.iter_document_keys():
+            for suffix in (".json", ".json.gz"):
+                p = d / (fs_safe(key) + suffix)
+                if p.exists():
+                    p.unlink()
+                    removed += 1
+        console.print(f"deleted {removed:,} migrated files")
+
+
+sync_app = typer.Typer(help="Move results between local scratch (work_dir) and the shared data_dir.",
+                       no_args_is_help=True)
+app.add_typer(sync_app, name="sync")
+
+
+def _only(only: str | None) -> dict[str, bool]:
+    if only is None:
+        return {"sqlite": True, "lancedb": True}
+    if only not in ("sqlite", "lancedb"):
+        raise typer.BadParameter("--only must be sqlite or lancedb")
+    return {"sqlite": only == "sqlite", "lancedb": only == "lancedb"}
+
+
+@sync_app.command("push")
+def sync_push(only: Annotated[str | None, typer.Option(help="sqlite | lancedb")] = None) -> None:
+    """Local work_dir/lancedb -> data_dir (SQLite via the backup API, LanceDB via rsync)."""
+    from galrag import sync
+    from galrag.config import get_settings
+
+    console.print_json(json.dumps(sync.push(get_settings(), **_only(only)), default=str))
+
+
+@sync_app.command("pull")
+def sync_pull(only: Annotated[str | None, typer.Option(help="sqlite | lancedb")] = None,
+              force: Annotated[bool, typer.Option(help="Overwrite an existing local SQLite.")] = False) -> None:
+    """data_dir -> local work_dir/lancedb (refuses to overwrite a local SQLite without --force)."""
+    from galrag import sync
+    from galrag.config import get_settings
+
+    try:
+        res = sync.pull(get_settings(), force=force, **_only(only))
+    except FileExistsError as e:
+        console.print(f"[red]{e}")
+        raise typer.Exit(1) from None
+    console.print_json(json.dumps(res, default=str))
+
+
+@app.command()
+def reconcile() -> None:
+    """Set embedded/n_chunks and paper_vec/abs_chunk in SQLite from the LanceDB contents."""
+    db, store = _db(), _store()
+    t0 = time.time()
+    res = db.reconcile_from_store(store)
+    console.print(f"[bold]reconcile:[/] {res} ({time.time() - t0:.0f} s)", highlight=False)
 
 
 # ------------------------------------------------------------------ MCP

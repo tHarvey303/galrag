@@ -232,26 +232,23 @@ def test_pdf(pdf_doc: Document):
 
 
 # ----------------------------------------------------------- persistence / bib
-def test_save_load_and_fs_safe(tmp_path, monkeypatch, arxiv_doc):
-    from galrag import config
+def test_save_load_and_fs_safe(tmp_path, arxiv_doc):
+    from galrag.db import Database
+    from galrag.models import PaperMeta
+    from galrag.parse import fs_safe, load_document, save_document
 
-    monkeypatch.setenv("GALRAG_DATA_DIR", str(tmp_path))
-    config.get_settings.cache_clear()
-    try:
-        from galrag.parse import fs_safe, load_document, save_document
-
-        assert fs_safe("astro-ph/0601001") == "astro-ph_0601001"
-        assert fs_safe("arXiv:2405.03781") == "arXiv_2405.03781"
-        p = save_document(arxiv_doc)
-        assert p.parent == tmp_path / "docs"
-        d2 = load_document(arxiv_doc.paper_key)
-        assert d2 is not None and d2.full_text == arxiv_doc.full_text
-        save_document(arxiv_doc, gz=True)
-        assert not p.exists()
-        assert load_document(arxiv_doc.paper_key).full_text == arxiv_doc.full_text
-        assert load_document("nope") is None
-    finally:
-        config.get_settings.cache_clear()
+    assert fs_safe("astro-ph/0601001") == "astro-ph_0601001"
+    assert fs_safe("arXiv:2405.03781") == "arXiv_2405.03781"
+    db = Database(tmp_path / "galrag.sqlite")
+    db.upsert_papers([PaperMeta(paper_key=arxiv_doc.paper_key, title="t")])
+    save_document(arxiv_doc, db)
+    d2 = load_document(arxiv_doc.paper_key, db)
+    assert d2 is not None and d2.full_text == arxiv_doc.full_text
+    save_document(arxiv_doc, db)                 # replace, not duplicate
+    assert db.count_documents() == 1
+    assert load_document("nope", db) is None
+    assert not (tmp_path / "docs").exists()      # no per-document files any more
+    db.close()
 
 
 def test_parse_bibcode():
@@ -355,7 +352,7 @@ def test_usable_latexml_and_raw_paths(tmp_path):
     assert usable_latexml((FIX / "arxiv_2405.03781.html").read_text())
     assert usable_latexml((FIX / "ar5iv_1601.00001.html").read_text())
     assert not usable_latexml("<html><body><h1>No HTML for '2405.99999'</h1></body></html>")
-    s = Settings(data_dir=tmp_path)
+    s = Settings(data_dir=tmp_path, work_dir=None)
     assert raw_path("arxiv_html", "astro-ph/0601001", s).name == "astro-ph_0601001.html.gz"
     assert raw_path("arxiv_pdf", "2405.03781", s) == tmp_path / "raw" / "pdf" / "2405.03781.pdf"
     assert fs_safe("2024A&A...684A..40X") == "2024A&A...684A..40X"
@@ -368,7 +365,7 @@ def test_fetch_uses_cache(tmp_path):
     from galrag.fetch import fetch_fulltext, raw_path
     from galrag.models import PaperMeta
 
-    s = Settings(data_dir=tmp_path)
+    s = Settings(data_dir=tmp_path, work_dir=None)
     s.ensure_dirs()
     p = raw_path("arxiv_html", "2405.03781", s)
     p.write_bytes(gzip.compress((FIX / "arxiv_2405.03781.html").read_bytes()))

@@ -149,7 +149,7 @@ def embedder():
 def store(tmp_path, embedder):
     from galrag.store import VectorStore
 
-    cfg = Settings(data_dir=tmp_path)
+    cfg = Settings(data_dir=tmp_path, work_dir=None, lancedb_dir_override=None)
     return VectorStore(cfg, embedder=embedder)
 
 

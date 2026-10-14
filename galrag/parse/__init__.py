@@ -5,19 +5,16 @@ Public API
 * :func:`parse_fetched` – dispatch a :class:`~galrag.fetch.FetchResult` to the right parser.
 * :func:`resolve_bibliography` – link ``BibEntry.bibcode`` using the citing paper's ADS
   reference list (and exact arXiv/DOI matches against the corpus).
-* :func:`save_document` / :func:`load_document` – ``docs/<fs_safe(key)>.json[.gz]``.
+* :func:`save_document` / :func:`load_document` – the SQLite ``documents`` table
+  (:meth:`galrag.db.Database.put_document` / ``get_document``).
 * :func:`fs_safe` – filesystem-safe key.
 """
 
 from __future__ import annotations
 
-import gzip
-import os
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from galrag.config import get_settings
 from galrag.models import BibEntry, Document, PaperMeta
 from galrag.parse.bib import journal_bibstem, parse_bib_text, strip_accents
 
@@ -26,7 +23,6 @@ if TYPE_CHECKING:
     from galrag.fetch import FetchResult
 
 __all__ = [
-    "doc_path",
     "fs_safe",
     "load_document",
     "parse_bibcode",
@@ -70,37 +66,14 @@ def parse_fetched(result: FetchResult, meta: PaperMeta) -> Document:
 
 
 # ------------------------------------------------------------------ persistence
-def doc_path(paper_key: str, *, gz: bool = False) -> Path:
-    d = get_settings().docs_dir
-    return d / (fs_safe(paper_key) + (".json.gz" if gz else ".json"))
+def save_document(doc: Document, db: Database) -> None:
+    """Store ``doc`` in the SQLite ``documents`` table (gzipped JSON)."""
+    db.put_document(doc)
 
 
-def save_document(doc: Document, *, gz: bool = False) -> Path:
-    """Write ``doc`` atomically to ``docs/<fs_safe(key)>.json`` (or ``.json.gz``)."""
-    p = doc_path(doc.paper_key, gz=gz)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    data = doc.model_dump_json().encode("utf-8")
-    if gz:
-        data = gzip.compress(data, 6)
-    tmp = p.with_name(p.name + f".tmp{os.getpid()}")
-    tmp.write_bytes(data)
-    os.replace(tmp, p)
-    other = doc_path(doc.paper_key, gz=not gz)        # avoid stale twins
-    if other.exists():
-        other.unlink()
-    return p
-
-
-def load_document(paper_key: str) -> Document | None:
-    """Load a saved document (``.json`` or ``.json.gz``); None if not parsed yet."""
-    for gz in (False, True):
-        p = doc_path(paper_key, gz=gz)
-        if p.exists():
-            data = p.read_bytes()
-            if gz:
-                data = gzip.decompress(data)
-            return Document.model_validate_json(data)
-    return None
+def load_document(paper_key: str, db: Database) -> Document | None:
+    """Load a parsed document from SQLite; None if not parsed yet."""
+    return db.get_document(paper_key)
 
 
 # ------------------------------------------------------------ bibliography links

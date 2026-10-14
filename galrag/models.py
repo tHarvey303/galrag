@@ -129,7 +129,7 @@ class BibEntry(BaseModel):
 
 
 class Document(BaseModel):
-    """Canonical parsed full text; serialised to ``docs/<paper_key>.json``."""
+    """Canonical parsed full text; stored gzipped in the SQLite ``documents`` table."""
 
     paper_key: str
     source: FullTextSource

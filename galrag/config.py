@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -38,6 +38,7 @@ class Settings(BaseSettings):
         env_file=(".env", str(REPO_ROOT / ".env")),
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # --- credentials / identity ---
@@ -45,7 +46,14 @@ class Settings(BaseSettings):
     contact: str = Field(default="", description="Contact string placed in the User-Agent")
 
     # --- paths ---
+    # ``data_dir`` is the archive on shared network storage (Nexus): the MCP server reads it,
+    # and the loops push finished results into it in bulk (``galrag sync push``).
     data_dir: Path = Field(default=REPO_ROOT / "data")
+    # ``work_dir`` is machine-local scratch for hot I/O: the live SQLite and the raw
+    # HTML/PDF cache.  Unset = everything lives in ``data_dir`` (single-machine layout).
+    work_dir: Path | None = Field(default=None, description="Local scratch dir (GALRAG_WORK_DIR)")
+    # Explicit LanceDB location (GALRAG_LANCEDB_DIR), e.g. local disk on the GPU machine.
+    lancedb_dir_override: Path | None = Field(default=None, validation_alias="GALRAG_LANCEDB_DIR")
 
     # --- corpus ---
     topic_query: str = TOPIC_QUERY
@@ -81,21 +89,38 @@ class Settings(BaseSettings):
     rerank_enabled: bool = True
     rerank_top_n: int = 50
 
+    @field_validator("work_dir", "lancedb_dir_override", mode="before")
+    @classmethod
+    def _empty_is_none(cls, v):
+        return None if v is None or (isinstance(v, str) and not v.strip()) else v
+
     # --- derived paths ---
     @property
     def sqlite_path(self) -> Path:
+        """The live SQLite (local scratch when ``work_dir`` is set)."""
+        return (self.work_dir or self.data_dir) / "galrag.sqlite"
+
+    @property
+    def archive_sqlite_path(self) -> Path:
+        """The SQLite copy on the shared data dir (= ``sqlite_path`` without a work dir)."""
         return self.data_dir / "galrag.sqlite"
 
     @property
     def raw_dir(self) -> Path:
-        return self.data_dir / "raw"
+        """Raw HTML/PDF cache: machine-local, never synced."""
+        return (self.work_dir or self.data_dir) / "raw"
 
     @property
     def docs_dir(self) -> Path:
+        """Legacy per-document JSON directory; only read by ``galrag migrate-docs``."""
         return self.data_dir / "docs"
 
     @property
     def lancedb_dir(self) -> Path:
+        return self.lancedb_dir_override or self.archive_lancedb_dir
+
+    @property
+    def archive_lancedb_dir(self) -> Path:
         return self.data_dir / "lancedb"
 
     @property
@@ -122,8 +147,11 @@ class Settings(BaseSettings):
         return "papers__" + self.embed_model.replace("/", "__").replace("-", "_").replace(".", "_")
 
     def ensure_dirs(self) -> None:
-        for p in (self.data_dir, self.raw_dir / "html", self.raw_dir / "pdf", self.docs_dir,
-                  self.lancedb_dir, self.models_dir, self.logs_dir):
+        dirs = [self.data_dir, self.raw_dir / "html", self.raw_dir / "pdf", self.lancedb_dir,
+                self.models_dir, self.logs_dir]
+        if self.work_dir is not None:
+            dirs.append(self.work_dir)
+        for p in dirs:
             p.mkdir(parents=True, exist_ok=True)
 
 

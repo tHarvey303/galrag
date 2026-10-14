@@ -10,10 +10,14 @@ identifiers   many-to-one lookup table: any id (bibcode, arXiv id, DOI, alternat
 refs          (citing_key, cited_bibcode) edges from the ADS ``reference`` field
 bibtex        cached BibTeX text per bibcode
 runs          harvest/update bookkeeping (last entdate seen, counts)
+documents     parsed full-text Document per paper (gzipped JSON); replaces the old
+              ``docs/<key>.json`` files (thousands of small files are bad on Nexus)
 """
 
 from __future__ import annotations
 
+import gzip
+import logging
 import re
 import sqlite3
 import time
@@ -24,7 +28,9 @@ from pathlib import Path
 from typing import ClassVar
 
 from galrag.config import get_settings
-from galrag.models import PaperMeta, Status, Tier
+from galrag.models import Document, PaperMeta, Status, Tier
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -85,6 +91,13 @@ CREATE TABLE IF NOT EXISTS runs (
     n_new      INTEGER DEFAULT 0,
     n_updated  INTEGER DEFAULT 0,
     note       TEXT
+);
+CREATE TABLE IF NOT EXISTS documents (
+    paper_key      TEXT PRIMARY KEY REFERENCES papers(paper_key) ON DELETE CASCADE,
+    parser_version TEXT,
+    source         TEXT,
+    json_gz        BLOB NOT NULL,        -- gzip(Document.model_dump_json())
+    saved_at       TEXT NOT NULL
 );
 """
 
@@ -235,6 +248,110 @@ class Database:
                 self.conn.execute(f"ALTER TABLE papers ADD COLUMN {col} {decl}")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_papers_paper_vec ON papers(paper_vec, priority DESC)")
 
+    # --------------------------------------------------------------- documents
+    _DOC_UPSERT = ("INSERT OR REPLACE INTO documents(paper_key,parser_version,source,json_gz,saved_at) "
+                   "VALUES(?,?,?,?,?)")
+
+    @staticmethod
+    def _doc_row(doc: Document, ts: str) -> tuple:
+        blob = gzip.compress(doc.model_dump_json().encode("utf-8"), 6)
+        return (doc.paper_key, doc.parser_version, doc.source, blob, ts)
+
+    def put_document(self, doc: Document) -> None:
+        """Store (or replace) a parsed document: one statement, retried on lock stalls."""
+        self._execute_retry(self._DOC_UPSERT, self._doc_row(doc, now_iso()))
+
+    def get_document(self, paper_key: str) -> Document | None:
+        row = self.conn.execute("SELECT json_gz FROM documents WHERE paper_key=?", (paper_key,)).fetchone()
+        if row is None:
+            return None
+        return Document.model_validate_json(gzip.decompress(row[0]))
+
+    def has_document(self, paper_key: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM documents WHERE paper_key=?",
+                                 (paper_key,)).fetchone() is not None
+
+    def iter_document_keys(self) -> Iterator[str]:
+        yield from (r[0] for r in self.conn.execute("SELECT paper_key FROM documents").fetchall())
+
+    def count_documents(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0])
+
+    def delete_document(self, paper_key: str) -> None:
+        self._execute_retry("DELETE FROM documents WHERE paper_key=?", (paper_key,))
+
+    def import_document_files(self, docs_dir: Path, *, batch: int = 500) -> int:
+        """Load legacy ``docs/*.json`` / ``*.json.gz`` files into the documents table
+        (transactions of ``batch``; keys already present are skipped).  Returns #imported."""
+        docs_dir = Path(docs_dir)
+        if not docs_dir.is_dir():
+            return 0
+        have = set(self.iter_document_keys())
+        known = {r[0] for r in self.conn.execute("SELECT paper_key FROM papers")}
+        n = 0
+        pending: list[tuple] = []
+
+        def flush() -> None:
+            nonlocal pending
+            if pending:
+                with self.tx() as c:
+                    c.executemany(self._DOC_UPSERT, pending)
+                pending = []
+
+        ts = now_iso()
+        for entry in sorted(docs_dir.iterdir()):
+            name = entry.name
+            if not name.endswith((".json", ".json.gz")):
+                continue
+            try:
+                data = entry.read_bytes()
+                if name.endswith(".gz"):
+                    data = gzip.decompress(data)
+                doc = Document.model_validate_json(data)
+            except Exception as e:  # noqa: BLE001
+                log.warning("skipping unreadable document file %s: %s", name, e)
+                continue
+            if doc.paper_key in have:
+                continue
+            if doc.paper_key not in known:
+                log.warning("skipping %s: paper_key %s not in papers table", name, doc.paper_key)
+                continue
+            pending.append(self._doc_row(doc, ts))
+            have.add(doc.paper_key)
+            n += 1
+            if len(pending) >= batch:
+                flush()
+                log.info("imported %d documents", n)
+        flush()
+        return n
+
+    def reconcile_from_store(self, store) -> dict[str, int]:
+        """Bring the best-effort status columns in line with the vector store: papers whose
+        full text is in the chunk table become ``embedded`` (with ``n_chunks``); papers in
+        the paper-vector table get ``paper_vec=1``; papers with an abstract-only chunk get
+        ``abs_chunk=1``.  Used after another machine embedded into the shared LanceDB."""
+        counts = store.chunk_counts_by_paper()          # {paper_key: (n_fulltext, n_abstract)}
+        pvec = store.paper_vec_keys()
+        known = {r[0]: (r[1], r[2], r[3], r[4]) for r in self.conn.execute(
+            "SELECT paper_key, status, n_chunks, paper_vec, abs_chunk FROM papers")}
+        to_embedded, to_pvec, to_abs = [], [], []
+        for key, (st, nch, pv, ab) in known.items():
+            nf, na = counts.get(key, (0, 0))
+            if nf and (st != Status.EMBEDDED or nch != nf):
+                to_embedded.append((str(Status.EMBEDDED), nf, now_iso(), key))
+            if key in pvec and not pv:
+                to_pvec.append((key,))
+            if na and not ab:
+                to_abs.append((key,))
+        with self.tx() as c:
+            c.executemany("UPDATE papers SET status=?, n_chunks=?, error=NULL, updated_at=? WHERE paper_key=?",
+                          to_embedded)
+            c.executemany("UPDATE papers SET paper_vec=1 WHERE paper_key=?", to_pvec)
+            c.executemany("UPDATE papers SET abs_chunk=1 WHERE paper_key=?", to_abs)
+        return {"embedded": len(to_embedded), "paper_vec": len(to_pvec), "abs_chunk": len(to_abs),
+                "store_fulltext_papers": sum(1 for v in counts.values() if v[0]),
+                "store_paper_vectors": len(pvec)}
+
     def iter_without_paper_vec(self, *, limit: int | None = None) -> Iterator[sqlite3.Row]:
         q = "SELECT * FROM papers WHERE paper_vec=0 ORDER BY priority DESC"
         if limit:
@@ -302,6 +419,11 @@ class Database:
         if limit:
             q += f" LIMIT {int(limit)}"
         return [(r[0], r[1]) for r in self.conn.execute(q, vals)]
+
+    def iter_all_keys(self) -> list[tuple[str, float]]:
+        """(paper_key, priority) for every paper, highest priority first (index-only read)."""
+        return [(r[0], r[1]) for r in self.conn.execute(
+            "SELECT paper_key, priority FROM papers ORDER BY priority DESC")]
 
     def count_by_status(self) -> dict[str, int]:
         return {r[0]: r[1] for r in self.conn.execute("SELECT status, COUNT(*) FROM papers GROUP BY status")}

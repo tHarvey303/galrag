@@ -1,7 +1,7 @@
 """MCP server tools on a tiny temporary corpus (real parser, chunker and embedding model).
 
-The corpus lives in a temporary GALRAG_DATA_DIR (SQLite, docs/, LanceDB); the
-production store is never touched.  The embedding model is read from the real
+The corpus lives in a temporary GALRAG_DATA_DIR (SQLite incl. documents, LanceDB);
+GALRAG_WORK_DIR / GALRAG_LANCEDB_DIR are cleared so the production store is never touched.  The embedding model is read from the real
 HF cache (``<real data dir>/models``).
 """
 
@@ -29,16 +29,20 @@ def corpus(tmp_path_factory):
     os.environ.setdefault("HF_HOME", str(real_models))
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     tmp = tmp_path_factory.mktemp("galrag_data")
-    old = os.environ.get("GALRAG_DATA_DIR")
+    names = ("GALRAG_DATA_DIR", "GALRAG_WORK_DIR", "GALRAG_LANCEDB_DIR")
+    old = {n: os.environ.get(n) for n in names}
     os.environ["GALRAG_DATA_DIR"] = str(tmp)
+    os.environ["GALRAG_WORK_DIR"] = ""           # empty = unset (overrides a .env value)
+    os.environ["GALRAG_LANCEDB_DIR"] = ""
     config.get_settings.cache_clear()
     try:
         yield from _build(tmp)
     finally:
-        if old is None:
-            os.environ.pop("GALRAG_DATA_DIR", None)
-        else:
-            os.environ["GALRAG_DATA_DIR"] = old
+        for n, v in old.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
         config.get_settings.cache_clear()
         from galrag import server
 
@@ -70,8 +74,6 @@ def _build(tmp: Path):
     cited_keys = {k for _, p in d1.iter_paragraphs() for c in p.cites for k in c.bib_keys}
     bib = next(b for b in d1.bibliography if b.key in cited_keys and b.first_author and b.year)
     bib.bibcode = CITED
-    for d in (d1, d2):
-        save_document(d)
 
     metas = [
         PaperMeta(paper_key=K1, bibcode=K1, arxiv_id="2405.03781", title=d1.title,
@@ -89,6 +91,8 @@ def _build(tmp: Path):
     ]
     db = Database(tmp / "galrag.sqlite")
     db.upsert_papers(metas)
+    for d in (d1, d2):
+        save_document(d, db)
     for m in metas[:2]:
         db.set_status(m.paper_key, "parsed", source="arxiv_html" if m.paper_key == K1 else "ar5iv")
     store = VectorStore(embedder=emb, uri=str(tmp / "lancedb"))
@@ -258,7 +262,7 @@ def test_corpus_stats_and_resources(corpus):
     assert s["papers_total"] == 3
     assert s["by_status"] == {"embedded": 2, "metadata": 1}
     assert s["vector_papers"] == 3 and s["vector_chunks"] == corpus["store"].count()
-    assert s["docs_on_disk"] == 2
+    assert s["documents"] == 2
     md = server.paper_resource(K1)
     assert md.startswith("# ") and K1 in md and "`S1`" in md
     sec = server.section_resource(K1, "S1")
@@ -285,7 +289,8 @@ async def test_stdio_smoke(tmp_path):
 
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "galrag.server"],
-        env={"GALRAG_DATA_DIR": str(tmp_path), "GALRAG_ADS_TOKEN": ""},
+        env={"GALRAG_DATA_DIR": str(tmp_path), "GALRAG_WORK_DIR": "", "GALRAG_LANCEDB_DIR": "",
+             "GALRAG_ADS_TOKEN": ""},
         cwd=str(tmp_path))
     with anyio.fail_after(600):
         async with stdio_client(params) as (read, write), ClientSession(read, write) as session:

@@ -175,6 +175,41 @@ class VectorStore:
         t = self.chunks
         return t is not None and t.count_rows(f"paper_key = {_q(paper_key)}") > 0
 
+    @staticmethod
+    def _scan(table, columns: list[str], where: str | None = None) -> pa.Table:
+        """Projected full scan (reads only ``columns``; no vectors)."""
+        q = table.search().select(columns)
+        if where:
+            q = q.where(where)
+        return q.limit(None).to_arrow()
+
+    def fulltext_paper_keys(self) -> set[str]:
+        """Papers with full-text chunks (any chunk with ``kind != 'abstract'``)."""
+        t = self.chunks
+        if t is None:
+            return set()
+        return set(self._scan(t, ["paper_key"], "kind != 'abstract'").column("paper_key").to_pylist())
+
+    def paper_vec_keys(self) -> set[str]:
+        """Papers that have a title+abstract vector in the paper-level table."""
+        t = self.papers
+        if t is None:
+            return set()
+        return set(self._scan(t, ["paper_key"]).column("paper_key").to_pylist())
+
+    def chunk_counts_by_paper(self) -> dict[str, tuple[int, int]]:
+        """{paper_key: (n_fulltext_chunks, n_abstract_only_chunks)}.  ``n_fulltext_chunks``
+        counts every chunk of a full-text paper (as ``papers.n_chunks`` does)."""
+        t = self.chunks
+        if t is None:
+            return {}
+        tbl = self._scan(t, ["paper_key", "source"])
+        out: dict[str, list[int]] = {}
+        for key, src in zip(tbl.column("paper_key").to_pylist(), tbl.column("source").to_pylist()):
+            e = out.setdefault(key, [0, 0])
+            e[1 if src == "abstract_only" else 0] += 1
+        return {k: (v[0], v[1]) for k, v in out.items()}
+
     def delete_paper(self, paper_key: str) -> None:
         for t in (self.chunks,):
             if t is not None:

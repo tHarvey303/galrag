@@ -215,7 +215,7 @@ def ingest_ident(db: Database, store, embedder, ident: str, *, embed: bool = Tru
             continue
         res["bibcode"], res["title"] = meta.bibcode, meta.title
         have_doc = status in (Status.PARSED, Status.CHUNKED, Status.EMBEDDED) and \
-            load_document(key) is not None
+            load_document(key, db) is not None
         if have_doc and not force_fetch:
             res["fulltext"] = f"already parsed ({row['source']})"
         else:
@@ -340,6 +340,9 @@ def corpus_stats(db: Database, store=None, *, disk: bool = True) -> dict[str, An
     t0 = time.time()
     out: dict[str, Any] = {
         "data_dir": str(s.data_dir),
+        "work_dir": str(s.work_dir) if s.work_dir else None,
+        "sqlite_path": str(s.sqlite_path),
+        "lancedb_dir": str(s.lancedb_dir),
         "papers_total": int(db.conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]),
         "by_status": db.count_by_status(),
         "by_tier": db.count_by_tier(),
@@ -359,10 +362,7 @@ def corpus_stats(db: Database, store=None, *, disk: bool = True) -> dict[str, An
         out["vector_papers"] = int(st.papers.count_rows()) if st.papers is not None else 0
     except Exception as e:  # noqa: BLE001
         out["vector_chunks"] = f"error: {e}"
-    try:
-        out["docs_on_disk"] = sum(1 for e in os.scandir(s.docs_dir) if e.name.endswith((".json", ".json.gz")))
-    except OSError:
-        out["docs_on_disk"] = 0
+    out["documents"] = db.count_documents()
     runs = {}
     for kind in ("harvest", "update", "ingest"):
         r = db.last_run(kind)
@@ -378,12 +378,13 @@ def corpus_stats(db: Database, store=None, *, disk: bool = True) -> dict[str, An
         fails[(st_, _clean_err(err))] += 1
     out["top_failures"] = [{"status": k[0], "error": k[1], "n": n} for k, n in fails.most_common(12)]
     if disk:
-        out["disk"] = {name: human_bytes(_du(s.data_dir / name))
-                       for name in ("raw", "docs", "lancedb", "models", "logs")}
-        try:
-            out["disk"]["galrag.sqlite"] = human_bytes(os.path.getsize(s.sqlite_path))
-        except OSError:
-            pass
+        out["disk"] = {"raw": human_bytes(_du(s.raw_dir)), "lancedb": human_bytes(_du(s.lancedb_dir)),
+                       **{name: human_bytes(_du(s.data_dir / name)) for name in ("models", "logs")}}
+        for label, path in (("galrag.sqlite", s.sqlite_path), ("galrag.sqlite (archive)", s.archive_sqlite_path)):
+            try:
+                out["disk"][label] = human_bytes(os.path.getsize(path))
+            except OSError:
+                pass
     out["elapsed_s"] = round(time.time() - t0, 2)
     return out
 

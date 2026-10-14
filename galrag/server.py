@@ -128,7 +128,7 @@ def _paper_brief(key: str) -> dict:
 def _load_doc(key: str) -> Document | None:
     from galrag.parse import load_document
 
-    return load_document(key)
+    return load_document(key, get_db())
 
 
 def _require_doc(key: str) -> Document:
