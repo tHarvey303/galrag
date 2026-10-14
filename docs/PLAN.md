@@ -73,17 +73,40 @@ Priority score for the fetch queue = `log1p(citation_count) + 0.4·(year−2000)
 + 2·is_review + 1·is_tierA`. Any paper can be promoted on demand via the
 `ingest_paper` tool.
 
-## 4. Storage layout (`GALRAG_DATA_DIR`, default `<repo>/data`)
+## 4. Storage layout (`GALRAG_DATA_DIR` archive + `GALRAG_WORK_DIR` local scratch)
+
+Site policy: `/nexus` is shared network storage, and heavy I/O there (thousands of small
+files, hot databases) slows the whole platform. Jobs therefore do their hot I/O on local
+disk and move only finished results to Nexus, in bulk.
 
 ```
-data/
-  galrag.sqlite            metadata, reference lists, bibtex, ingestion state (WAL mode)
-  raw/html/<arxiv_id>.html raw fetched HTML (gzip)      raw/pdf/<id>.pdf
-  docs/<paper_key>.json    canonical parsed Document (see §5)
+$GALRAG_DATA_DIR (Nexus, the archive; read by the MCP server)
+  galrag.sqlite            metadata, reference lists, bibtex, ingestion state, and the
+                           `documents` table (canonical parsed Document per paper, gzipped JSON, see §5)
   lancedb/                 LanceDB tables: chunks (vector + FTS), papers (vector of title+abstract)
   models/                  HF cache for embedding / reranker models
   logs/
+$GALRAG_WORK_DIR (local disk, optional)
+  galrag.sqlite            the live database written by the fetch loop (WAL)
+  raw/html/<arxiv_id>.html raw fetched HTML (gzip)      raw/pdf/<id>.pdf   (never synced)
+$GALRAG_LANCEDB_DIR (optional; local disk on the GPU machine)
 ```
+
+* `galrag.sync.push` copies SQLite with the `sqlite3` backup API into `galrag.sqlite.tmp`
+  on the archive and atomically renames it into place: one sequential write, never the live
+  file or its `-wal`/`-shm`. It rsyncs (`-a --delete`) a local LanceDB into
+  `data_dir/lancedb`. `pull` does the reverse. The loops push every `--sync-interval`
+  seconds (default 30 min) and at exit (`--push sqlite,lancedb` for fetch, `--push lancedb`
+  for embed).
+* Documents live in SQLite (`documents` table), not in per-paper JSON files. The old
+  `docs/` directory is imported with `galrag migrate-docs`.
+* Embedding candidates come from the vector store, not from SQLite status alone:
+  full text = papers with status `parsed`/`embedded` that have a document but no chunk
+  with `kind != 'abstract'`; paper vectors = papers missing from the paper table. So
+  embedding can run on a GPU machine from a SQLite snapshot (LanceDB on its local disk,
+  pushed to Nexus). `galrag reconcile` then writes `embedded`/`n_chunks` and
+  `paper_vec`/`abs_chunk` into the fetch node's SQLite from the store contents.
+* With no `GALRAG_WORK_DIR`, everything lives in the data dir (single-machine layout).
 
 `paper_key` = bibcode when known, else `arXiv:<id>`. The SQLite `papers`
 table maps bibcode ⇄ arXiv id ⇄ DOI so any identifier resolves.

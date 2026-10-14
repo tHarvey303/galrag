@@ -39,8 +39,12 @@ listed in `.gitignore`.
 ```dotenv
 # NASA ADS API token: https://ui.adsabs.harvard.edu/user/settings/token
 GALRAG_ADS_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# Where the corpus lives (default: <repo>/data)
+# Where the corpus archive lives (default: <repo>/data); on shared/network storage
 GALRAG_DATA_DIR=/path/to/galrag/data
+# Machine-local scratch for the live SQLite and the raw HTML/PDF cache (see "Storage")
+GALRAG_WORK_DIR=/tmp/$USER/galrag
+# LanceDB location if not <data_dir>/lancedb (e.g. local disk on the GPU machine)
+# GALRAG_LANCEDB_DIR=/scratch/galrag/lancedb
 # optional
 GALRAG_CONTACT=you@example.org          # added to the HTTP User-Agent
 GALRAG_EMBED_WORKERS=6                  # embedding processes
@@ -59,15 +63,17 @@ is tracked in each paper's `status` column.
 
 ```bash
 galrag harvest                 # ADS metadata + reference lists for the topic query -> SQLite
-galrag fetch --tiers A,B       # full text (arXiv HTML -> ar5iv -> PDF), parse to docs/*.json
+galrag fetch --tiers A,B       # full text (arXiv HTML -> ar5iv -> PDF), parsed into SQLite
 galrag embed --workers 6 --threads 24   # full-text chunks + title/abstract vectors -> LanceDB
 galrag index                   # FTS / scalar / IVF-PQ indexes (embed already does this)
 galrag stats                   # counts per status/tier, failures, disk usage
 ```
 
 `fetch` waits 4 s between arXiv requests (configurable), so a large backlog takes days.
-`scripts/run_fetch_parse.py` runs it detached. You can run `embed` repeatedly while
-fetching continues: each run picks up whatever has been parsed since the last one.
+`scripts/run_fetch_parse.py` runs it detached and pushes a SQLite snapshot to the data
+dir every `--sync-interval` seconds (default 1800) and at exit. You can run `embed`
+repeatedly while fetching continues: each run embeds the parsed papers that have no
+full-text chunks in LanceDB yet.
 
 ### Keeping it up to date and adding papers
 
@@ -165,17 +171,93 @@ DOI, or the internal `paper_key`.
 Hits with `kind="abstract"` or `source="abstract_only"` come from the ADS abstract, not
 from the full text. For these, `verbatim_span` is false.
 
-## Storage layout (`GALRAG_DATA_DIR`)
+## Storage layout
+
+### Shared archive vs local scratch
+
+`/nexus` is shared network storage. Heavy I/O there (thousands of small files, a hot
+database written by several loops) slows the whole platform and causes SQLite
+"database is locked" stalls. galrag therefore splits its storage:
+
+* **`GALRAG_DATA_DIR`** (on Nexus) is the *archive*: what the MCP server reads and what
+  the loops push finished results into, in bulk.
+* **`GALRAG_WORK_DIR`** (machine-local disk, optional) holds the hot files: the live
+  SQLite and the raw HTML/PDF cache. The raw cache is never synced.
+* **`GALRAG_LANCEDB_DIR`** (optional) moves LanceDB off the data dir. LanceDB writes a
+  few large fragment files, which is fine on Nexus, so only the GPU machine sets it.
+
+Without `GALRAG_WORK_DIR` everything lives in the data dir (single-machine layout).
 
 ```
-data/
-  galrag.sqlite         papers, identifiers (bibcode/arXiv/DOI -> paper_key), refs, bibtex, runs (WAL)
-  raw/html, raw/pdf     fetched raw files (cache; nothing is fetched twice)
-  docs/<key>.json       parsed Document: sections, paragraphs, offsets, bibliography, full_text
+$GALRAG_DATA_DIR/                 (Nexus, the archive)
+  galrag.sqlite         papers, identifiers (bibcode/arXiv/DOI -> paper_key), refs, bibtex, runs,
+                        documents (parsed Document per paper, gzipped JSON)
   lancedb/              chunks__<model> (vectors + FTS index), papers__<model> (title+abstract vectors)
   models/               Hugging Face cache (HF_HOME) for the embedding and reranker models
-  logs/galrag.log       rotating log (CLI and MCP server)
+  logs/                 galrag.log (CLI, MCP server), fetch_parse.log, embed.log
+$GALRAG_WORK_DIR/                 (local disk)
+  galrag.sqlite         the live database the loops write (WAL)
+  raw/html, raw/pdf     fetched raw files (cache; nothing is fetched twice on this machine)
 ```
+
+Parsed documents live in the SQLite `documents` table, not in thousands of
+`docs/*.json` files. To import an old `docs/` directory, run `galrag migrate-docs`
+(`--docs-dir PATH`, and optionally `--delete-files` once you have checked the count).
+
+### Sync commands
+
+```bash
+galrag sync pull                 # archive -> local: SQLite (backup API) + LanceDB (rsync); refuses
+                                 # to overwrite an existing local SQLite without --force
+galrag sync push                 # local -> archive: SQLite snapshot (backup API into a .tmp file,
+                                 # then an atomic rename) + rsync -a --delete of a local LanceDB
+galrag sync push --only sqlite   # or --only lancedb
+galrag reconcile                 # set embedded/n_chunks, paper_vec/abs_chunk from the LanceDB contents
+```
+
+`push` never copies the live SQLite file or its `-wal`/`-shm` files. It writes one
+consistent snapshot sequentially, so the archive is always a complete database. Treat the
+archive SQLite as read-only: anything written to it directly, for example by the MCP
+server's `ingest_paper`, is overwritten by the next push from the fetch node.
+
+### Typical setup on this node (fetch/parse)
+
+```bash
+# .env: GALRAG_DATA_DIR=<repo>/data   GALRAG_WORK_DIR=/tmp/$USER/galrag
+galrag sync pull                                   # once: local working copy of the SQLite
+nohup python scripts/run_fetch_parse.py --tiers A,B >> data/logs/fetch_parse.stdout 2>&1 &
+```
+
+The fetch loop pushes `sqlite,lancedb` (`--push`) every `--sync-interval` seconds (default
+1800) and again when it stops, including after SIGTERM/SIGINT. LanceDB is skipped when it
+already lives in the data dir.
+
+### Embedding on a GPU machine
+
+Embedding needs SQLite only as a read-mostly snapshot. Which papers still need embedding
+is decided from LanceDB itself: full-text candidates are papers with status
+`parsed`/`embedded` that have a document but no full-text chunks in the store, and
+paper-vector candidates are papers missing from the paper-level table. So the GPU machine
+can work from a stale snapshot.
+
+```bash
+# same conda env; its torch is a CPU build, so install a CUDA wheel there first:
+pip install torch --index-url https://download.pytorch.org/whl/cu126   # match the machine's CUDA
+export GALRAG_DATA_DIR=/nexus/.../vector_rag/data       # the Nexus archive
+export GALRAG_WORK_DIR=/scratch/$USER/galrag            # local disk
+export GALRAG_LANCEDB_DIR=/scratch/$USER/galrag/lancedb # local disk
+galrag sync pull                                         # SQLite snapshot + current LanceDB
+nohup python scripts/run_embed.py --loop --push lancedb >> embed.stdout 2>&1 &
+```
+
+`run_embed.py` rsyncs its local LanceDB into `$GALRAG_DATA_DIR/lancedb` every
+`--sync-interval` seconds and at exit. By default it pushes only `lancedb`, because its
+SQLite is a snapshot and must never overwrite the archive. To refresh the GPU machine's
+snapshot with newly parsed papers, run `galrag sync pull --only sqlite --force` there.
+
+Back on the fetch node, the archive's LanceDB is already on Nexus, so no pull is needed.
+Run `galrag reconcile` to record in the local SQLite what the GPU machine embedded. The
+next push carries those statuses to the archive.
 
 ## Paper status state machine
 
@@ -213,7 +295,8 @@ vector and an abstract-only chunk.
 ## Development
 
 ```bash
-ruff check galrag tests
-pytest tests/test_parse.py tests/test_server.py      # test_server loads the embedding model (slow cold)
+ruff check galrag scripts tests
+pytest tests/test_parse.py tests/test_sync_docs.py   # parsing, documents table, sync, reconcile (no model)
+pytest tests/test_server.py                          # loads the embedding model (slow cold)
 pytest tests/test_ads.py                             # live ADS tests (need a token)
 ```
