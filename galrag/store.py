@@ -289,10 +289,10 @@ class VectorStore:
             from lancedb.index import IvfPq
 
             dim = self.dim
-            t.create_index(config=IvfPq(distance_type="cosine",
+            t.create_index("vector", config=IvfPq(distance_type="cosine",
                                         num_partitions=max(1, int(math.sqrt(n))),
                                         num_sub_vectors=max(1, dim // 8)),
-                           vector_column_name="vector", replace=True)
+                           replace=True)
             out["ivf_pq"] = {"num_partitions": int(math.sqrt(n))}
         else:
             out["ivf_pq"] = "skipped (brute force)" if n <= VECTOR_INDEX_MIN_ROWS else "exists"

@@ -241,23 +241,31 @@ paper-vector candidates are papers missing from the paper-level table. So the GP
 can work from a stale snapshot.
 
 ```bash
-# same conda env; its torch is a CPU build, so install a CUDA wheel there first:
-pip install torch --index-url https://download.pytorch.org/whl/cu126   # match the machine's CUDA
+# same conda env (its torch is a CUDA wheel, which also runs on CPU-only nodes)
 export GALRAG_DATA_DIR=/nexus/.../vector_rag/data       # the Nexus archive
-export GALRAG_WORK_DIR=/scratch/$USER/galrag            # local disk
-export GALRAG_LANCEDB_DIR=/scratch/$USER/galrag/lancedb # local disk
-galrag sync pull                                         # SQLite snapshot + current LanceDB
-nohup python scripts/run_embed.py --loop --push lancedb >> embed.stdout 2>&1 &
+export GALRAG_WORK_DIR=/dev/shm/$USER/galrag            # local disk or tmpfs: only a snapshot lives here
+galrag sync pull --only sqlite                           # SQLite snapshot (~11 s onto tmpfs)
+nohup python scripts/run_embed.py --loop --refresh-snapshot --push none \
+      --chunks-per-batch 20000 >> data/logs/embed.stdout 2>&1 &
 ```
 
-`run_embed.py` rsyncs its local LanceDB into `$GALRAG_DATA_DIR/lancedb` every
-`--sync-interval` seconds and at exit. By default it pushes only `lancedb`, because its
-SQLite is a snapshot and must never overwrite the archive. To refresh the GPU machine's
-snapshot with newly parsed papers, run `galrag sync pull --only sqlite --force` there.
+This writes straight into the archive's LanceDB on Nexus (no `GALRAG_LANCEDB_DIR`), so
+the MCP server and the fetch node see new chunks immediately and nothing has to be
+rsynced. `--refresh-snapshot` re-pulls the SQLite snapshot before every pass after the
+first (`galrag sync pull --only sqlite --force`), so papers the fetch node parsed and
+pushed meanwhile get embedded without a restart. `--push none` because the snapshot must
+never overwrite the archive. `--chunks-per-batch 20000` keeps the H100 busy and produces
+fewer LanceDB fragments (an H100 embeds bge-base at a few thousand chunks/s; the loop is
+then bound by chunking and NFS writes, roughly 100-200 chunks/s end to end).
 
-Back on the fetch node, the archive's LanceDB is already on Nexus, so no pull is needed.
-Run `galrag reconcile` to record in the local SQLite what the GPU machine embedded. The
-next push carries those statuses to the archive.
+If you prefer a local LanceDB (`GALRAG_LANCEDB_DIR` on local disk), run
+`galrag sync pull` and `--push lancedb` instead: the local LanceDB is then rsynced into
+`$GALRAG_DATA_DIR/lancedb` every `--sync-interval` seconds and at exit.
+
+Back on the fetch node, run `galrag reconcile` to record in the local SQLite what the
+GPU machine embedded. The next push carries those statuses to the archive. Never run a
+fetch loop on the GPU machine while it uses `--refresh-snapshot`: the refresh would
+discard that loop's unpushed work.
 
 ## Paper status state machine
 
