@@ -277,14 +277,21 @@ class VectorStore:
         n = t.count_rows()
         self._create_fts(t) if force else self._ensure_fts(t)
         out["fts"] = True
-        try:
-            from lancedb.index import BTree
+        # Existing indexes are kept: rows appended later are folded in by refresh_indexes()
+        # (Table.optimize).  lancedb >= 0.40 reports index types in CamelCase ("IvfPq").
+        idx = t.list_indices()
+        has_vec = any(i.index_type.upper().startswith("IVF") for i in idx)
+        has_btree = any("paper_key" in i.columns for i in idx)
+        if force or not has_btree:
+            try:
+                from lancedb.index import BTree
 
-            t.create_index("paper_key", config=BTree(), replace=True)
-            out["paper_key_btree"] = True
-        except Exception as e:  # pragma: no cover  # noqa: BLE001
-            out["paper_key_btree"] = f"failed: {e}"
-        has_vec = any(i.index_type.startswith("IVF") for i in t.list_indices())
+                t.create_index("paper_key", config=BTree(), replace=True)
+                out["paper_key_btree"] = True
+            except Exception as e:  # pragma: no cover  # noqa: BLE001
+                out["paper_key_btree"] = f"failed: {e}"
+        else:
+            out["paper_key_btree"] = "exists"
         if n > VECTOR_INDEX_MIN_ROWS and (force or not has_vec):
             from lancedb.index import IvfPq
 
