@@ -75,9 +75,11 @@ def main() -> None:
         log.info("final push: %s", push(force=True))
 
 
-def _refresh_snapshot(s, db: Database, log) -> Database:
-    """Close ``db``, overwrite the local SQLite with the archive's, reopen.  Keeps the
-    old snapshot if the pull fails."""
+def _refresh_snapshot(s, db: Database, store, log) -> Database:
+    """Close ``db``, overwrite the local SQLite with the archive's, reopen, and reconcile
+    its statuses with the store (the archive does not know what this machine embedded, so
+    without that the MCP server reading this snapshot reports has_fulltext=false).
+    Keeps the old snapshot if the pull fails."""
     from galrag.sync import pull
 
     db.close()
@@ -85,7 +87,12 @@ def _refresh_snapshot(s, db: Database, log) -> Database:
         log.info("refresh snapshot: %s", pull(s, sqlite=True, lancedb=False, force=True))
     except Exception:
         log.exception("snapshot refresh failed; continuing with the previous snapshot")
-    return Database()
+    db = Database()
+    try:
+        log.info("reconcile: %s", db.reconcile_from_store(store))
+    except Exception:
+        log.exception("reconcile after refresh failed")
+    return db
 
 
 def _loop(a, s, db, store, push, log) -> None:
@@ -97,7 +104,7 @@ def _loop(a, s, db, store, push, log) -> None:
         while True:
             t0 = time.time()
             if a.refresh_snapshot and n_pass:
-                db = _refresh_snapshot(s, db, log)
+                db = _refresh_snapshot(s, db, store, log)
             n_pass += 1
             try:
                 if not a.no_abstracts:
