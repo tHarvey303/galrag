@@ -242,7 +242,7 @@ can work from a stale snapshot.
 
 ```bash
 # same conda env (its torch is a CUDA wheel, which also runs on CPU-only nodes)
-export GALRAG_DATA_DIR=/nexus/.../vector_rag/data       # the Nexus archive
+export GALRAG_DATA_DIR=/shared/path/to/galrag/data      # the shared archive
 export GALRAG_WORK_DIR=/dev/shm/$USER/galrag            # local disk or tmpfs: only a snapshot lives here
 galrag sync pull --only sqlite                           # SQLite snapshot (~11 s onto tmpfs)
 nohup python scripts/run_embed.py --loop --refresh-snapshot --push none \
