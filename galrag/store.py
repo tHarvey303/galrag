@@ -31,6 +31,7 @@ from typing import Any
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from galrag.config import Settings, get_settings
 from galrag.models import Chunk, PaperMeta, SearchHit
@@ -188,7 +189,10 @@ class VectorStore:
         t = self.chunks
         if t is None:
             return set()
-        return set(self._scan(t, ["paper_key"], "kind != 'abstract'").column("paper_key").to_pylist())
+        # Deduplicate in Arrow: materialising millions of Python strings per call leaked
+        # ~100 MB per pass in the embed loop (allocator never returned the memory).
+        col = self._scan(t, ["paper_key"], "kind != 'abstract'").column("paper_key")
+        return set(pc.unique(col).to_pylist())
 
     def paper_vec_keys(self) -> set[str]:
         """Papers that have a title+abstract vector in the paper-level table."""
@@ -199,16 +203,28 @@ class VectorStore:
 
     def chunk_counts_by_paper(self) -> dict[str, tuple[int, int]]:
         """{paper_key: (n_fulltext_chunks, n_abstract_only_chunks)}.  ``n_fulltext_chunks``
-        counts every chunk of a full-text paper (as ``papers.n_chunks`` does)."""
+        counts every chunk of a full-text paper (as ``papers.n_chunks`` does) and is 0 for
+        a paper whose only chunks are abstracts, consistent with
+        :meth:`fulltext_paper_keys` (so reconcile never marks such a paper embedded)."""
         t = self.chunks
         if t is None:
             return {}
-        tbl = self._scan(t, ["paper_key", "source"])
-        out: dict[str, list[int]] = {}
-        for key, src in zip(tbl.column("paper_key").to_pylist(), tbl.column("source").to_pylist()):
-            e = out.setdefault(key, [0, 0])
-            e[1 if src == "abstract_only" else 0] += 1
-        return {k: (v[0], v[1]) for k, v in out.items()}
+        tbl = self._scan(t, ["paper_key", "kind", "source"])
+        agg = tbl.group_by(["paper_key", "kind", "source"]).aggregate([("paper_key", "count")])
+        totals: dict[str, int] = {}
+        has_body: set[str] = set()
+        abs_only: dict[str, int] = {}
+        for key, kind, src, n in zip(agg.column("paper_key").to_pylist(), agg.column("kind").to_pylist(),
+                                     agg.column("source").to_pylist(), agg.column("paper_key_count").to_pylist()):
+            n = int(n)
+            if src == "abstract_only":
+                abs_only[key] = abs_only.get(key, 0) + n
+                continue
+            totals[key] = totals.get(key, 0) + n
+            if kind != "abstract":
+                has_body.add(key)
+        keys = set(totals) | set(abs_only)
+        return {k: (totals.get(k, 0) if k in has_body else 0, abs_only.get(k, 0)) for k in keys}
 
     def delete_paper(self, paper_key: str) -> None:
         for t in (self.chunks,):
@@ -308,10 +324,30 @@ class VectorStore:
     def refresh_indexes(self) -> None:
         """Fold rows appended since the last index build into the indexes
         (``Table.optimize``).  Not required for correctness (unindexed rows are
-        scanned), only for speed after large ingests."""
+        scanned), only for speed after large ingests.  ``optimize`` also prunes table
+        versions older than 7 days; see :meth:`vacuum` for an immediate prune."""
         for t in (self.chunks, self.papers):
             if t is not None:
                 t.optimize()
+
+    def vacuum(self, older_than_hours: float = 0.0) -> dict[str, Any]:
+        """Delete the files of table versions older than ``older_than_hours`` (0 = keep
+        only the current version).  Every upsert, delete, index build and optimize
+        creates a new version, and old vector-index builds in particular are large, so a
+        long embedding run can leave hundreds of GB behind.  Readers still on an older
+        version (e.g. a running MCP server) fail once and must reopen the table."""
+        from datetime import timedelta
+
+        out: dict[str, Any] = {}
+        for name, t in (("chunks", self.chunks), ("papers", self.papers)):
+            if t is None:
+                continue
+            # Table.cleanup_old_versions is deprecated and needs pylance; optimize() prunes too.
+            st = t.optimize(cleanup_older_than=timedelta(hours=older_than_hours))
+            prune = getattr(st, "prune", None)
+            out[name] = {"bytes_removed": int(getattr(prune, "bytes_removed", 0)),
+                         "old_versions": int(getattr(prune, "old_versions", 0))}
+        return out
 
     @property
     def dim(self) -> int:

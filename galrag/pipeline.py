@@ -202,6 +202,12 @@ def embed_documents(db: Database, store, embedder, items: list[tuple[PaperMeta, 
         if not cs:
             db.set_status(meta.paper_key, Status.FAILED_EMBED, error="no chunks produced")
             continue
+        if all(c.kind == "abstract" for c in cs):
+            # The parser produced no usable body text. Writing only an abstract chunk would
+            # leave the paper out of fulltext_paper_keys() and make it a candidate forever.
+            db.set_status(meta.paper_key, Status.FAILED_EMBED,
+                          error=f"no body text ({len(doc.full_text)} chars, source={doc.source})")
+            continue
         chunks.extend(cs)
         per_paper[meta.paper_key] = len(cs)
         info[meta.paper_key] = _paper_info(meta)

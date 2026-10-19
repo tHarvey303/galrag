@@ -184,6 +184,19 @@ def index(force: Annotated[bool, typer.Option(help="Rebuild indexes from scratch
 
 
 @app.command()
+def vacuum(older_than_hours: Annotated[float, typer.Option(
+        help="Delete files of LanceDB table versions older than this (0 = keep only the current version).")] = 0.0,
+) -> None:
+    """Reclaim disk from old LanceDB table versions (old index builds, compacted fragments).
+    Run it after a long embedding run; readers on an old version must reopen the table."""
+    store = _store()
+    t0 = time.time()
+    res = store.vacuum(older_than_hours=older_than_hours)
+    gb = sum(v["bytes_removed"] for v in res.values()) / 1e9
+    console.print(f"vacuum: {res}  ({gb:.1f} GB freed, {time.time() - t0:.0f} s)")
+
+
+@app.command()
 def ingest(
     idents: Annotated[list[str], typer.Argument(help="Bibcodes, arXiv ids, DOIs or 'query:<ADS query>'.")],
     embed: Annotated[bool, typer.Option("--embed/--no-embed", help="Embed after parsing.")] = True,

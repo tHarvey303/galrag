@@ -175,8 +175,9 @@ class FakeStore:
     def paper_vec_keys(self):
         return set(self.paper_vecs)
 
-    def chunk_counts_by_paper(self):
-        return {k: (sum(s != "abstract_only" for _, s in cs), sum(s == "abstract_only" for _, s in cs))
+    def chunk_counts_by_paper(self):   # same semantics as VectorStore.chunk_counts_by_paper
+        return {k: (sum(s != "abstract_only" for _, s in cs) if any(kind != "abstract" for kind, _ in cs) else 0,
+                    sum(s == "abstract_only" for _, s in cs))
                 for k, cs in self.chunks.items()}
 
     def upsert_chunks(self, chunks, vectors, paper_info=None):
@@ -289,3 +290,27 @@ def test_archive_raw_tar_and_delete(tmp_path):
     with tarfile.open(res["tar"]) as t:
         assert sorted(t.getnames()) == [f"html/p{i}.html.gz" for i in range(3)]
     assert "skipped" in archive_raw(s, min_mb=0, min_age_s=0)["raw"]
+
+
+def test_embed_documents_marks_papers_without_body_text(tmp_path):
+    """A parsed document with no body text yields only an abstract chunk; such a paper
+    must become failed:embed, not embedded, or it is re-embedded on every pass."""
+    from galrag.models import Paragraph, Section
+    from galrag.pipeline import embed_documents
+
+    db = _db_with_papers(tmp_path / "g.sqlite", ["A", "B"])
+    meta_a, meta_b = (PaperMeta.model_validate_json(db.get_row(k)["meta_json"]) for k in ("A", "B"))
+    body = "We observed the field and reduced the data with the standard pipeline. " * 6
+    sec = Section(id="S1", title="Observations", level=1,
+                  paragraphs=[Paragraph(id="S1.P1", kind="body", text=body, char_start=0,
+                                        char_end=len(body), page=None)])
+    doc_a = Document(paper_key="A", source="arxiv_html", title="Title A", abstract="An abstract.",
+                     sections=[sec], full_text=body)
+    doc_b = _doc("B", text="")                     # parser produced no body text at all
+    store = FakeStore()
+    n = embed_documents(db, store, FakeEmbedder(), [(meta_a, doc_a), (meta_b, doc_b)])
+    assert n > 0 and "A" in store.fulltext_paper_keys()
+    assert db.get_row("A")["status"] == Status.EMBEDDED
+    assert db.get_row("B")["status"] == Status.FAILED_EMBED
+    assert "no body text" in (db.get_row("B")["error"] or "")
+    assert "B" not in store.chunks

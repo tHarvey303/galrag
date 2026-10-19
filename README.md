@@ -245,18 +245,33 @@ can work from a stale snapshot.
 export GALRAG_DATA_DIR=/shared/path/to/galrag/data      # the shared archive
 export GALRAG_WORK_DIR=/dev/shm/$USER/galrag            # local disk or tmpfs: only a snapshot lives here
 galrag sync pull --only sqlite                           # SQLite snapshot (~11 s onto tmpfs)
-nohup python scripts/run_embed.py --loop --refresh-snapshot --push none \
-      --chunks-per-batch 20000 >> data/logs/embed.stdout 2>&1 &
+# one pass (e.g. after `galrag update`):
+python scripts/run_embed.py --push none --chunks-per-batch 20000
+# or keep up with a running fetch loop; restart every 50 passes (see below):
+nohup sh -c 'while python scripts/run_embed.py --loop --refresh-snapshot --push none \
+      --chunks-per-batch 20000 --max-passes 50; do :; done' >> data/logs/embed.stdout 2>&1 &
 ```
 
 This writes straight into the archive's LanceDB on Nexus (no `GALRAG_LANCEDB_DIR`), so
 the MCP server and the fetch node see new chunks immediately and nothing has to be
 rsynced. `--refresh-snapshot` re-pulls the SQLite snapshot before every pass after the
-first (`galrag sync pull --only sqlite --force`), so papers the fetch node parsed and
-pushed meanwhile get embedded without a restart. `--push none` because the snapshot must
-never overwrite the archive. `--chunks-per-batch 20000` keeps the H100 busy and produces
-fewer LanceDB fragments (an H100 embeds bge-base at a few thousand chunks/s; the loop is
-then bound by chunking and NFS writes, roughly 100-200 chunks/s end to end).
+first (`galrag sync pull --only sqlite --force`) and reconciles it with the store, so
+papers the fetch node parsed and pushed meanwhile get embedded without a restart and the
+MCP server reading the snapshot reports correct statuses. `--push none` because the
+snapshot must never overwrite the archive. `--chunks-per-batch 20000` keeps the H100 busy
+and produces fewer LanceDB fragments (an H100 embeds bge-base at a few thousand chunks/s;
+the loop is then bound by chunking and NFS writes, roughly 400-600 chunks/s end to end;
+the whole tier A+B corpus, 4.5M chunks, took about four hours of GPU time).
+`--max-passes` exists because LanceDB's full-table scans retain 100-200 MB per pass
+inside the library (the process reached 68 GB after 378 passes); the shell loop restarts
+it with fresh memory.
+
+**Disk: run `galrag vacuum` after a long embedding run.** Every upsert, index build and
+optimize creates a new LanceDB table version, and old vector-index builds are large.
+`optimize()` only prunes versions older than 7 days, so a few days of embedding left
+470 GB of dead index files next to a 55 GB table. `galrag vacuum` (keep only the current
+version) reclaims them; any MCP server still holding an older version fails once and
+reopens.
 
 If you prefer a local LanceDB (`GALRAG_LANCEDB_DIR` on local disk), run
 `galrag sync pull` and `--push lancedb` instead: the local LanceDB is then rsynced into

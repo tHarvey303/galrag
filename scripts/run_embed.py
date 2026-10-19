@@ -55,6 +55,10 @@ def main() -> None:
     ap.add_argument("--chunks-per-batch", type=int, default=2000,
                     help="Chunks per embed+write batch (2000 on CPU; 20000 keeps a GPU busy and makes "
                          "fewer LanceDB fragments).")
+    ap.add_argument("--max-passes", type=int, default=0,
+                    help="With --loop: exit after this many passes (0 = run forever). LanceDB's full-table "
+                         "scans retain ~100-200 MB per pass inside the library, so wrap the script in a "
+                         "shell loop and let it restart every few dozen passes.")
     a = ap.parse_args()
     s = get_settings()
     h = RotatingFileHandler(s.logs_dir / "embed.log", maxBytes=50_000_000, backupCount=3)
@@ -121,6 +125,9 @@ def _loop(a, s, db, store, push, log) -> None:
                 log.exception("pass failed; retrying after %ds", a.interval)
             push()
             if not a.loop or stop.flag:
+                break
+            if a.max_passes and n_pass >= a.max_passes:
+                log.info("max passes (%d) reached; exiting so the wrapper can restart the process", a.max_passes)
                 break
             for _ in range(int(a.interval)):     # sleep, but wake up for SIGTERM/SIGINT
                 if stop.flag:
