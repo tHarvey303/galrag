@@ -11,8 +11,9 @@ MCP server.
   exact character offsets into the document text, so `full_text[char_start:char_end]`
   reproduces a passage exactly.
 * **Hybrid search** in LanceDB: BM25 full-text search plus `BAAI/bge-base-en-v1.5`
-  dense vectors (CPU), fused with reciprocal-rank fusion, with an optional
-  `bge-reranker-base` cross-encoder.
+  dense vectors over passages and over title+abstract, fused with reciprocal-rank fusion
+  and a mild citation prior, then reranked with the `bge-reranker-v2-m3` cross-encoder
+  (see "Ranking" below).
 * **Verification tools**: locate quotes verbatim (`get_quote`), check claims
   (`verify_claim`), find where paper A cites paper B (`citation_contexts`), resolve
   free-text citations, and export BibTeX.
@@ -293,6 +294,47 @@ metadata ──fetch──> fetched ──parse──> parsed ──chunk+embed�
 `galrag fetch --retry-failed` retries papers whose fetch or parse failed. Papers that
 stay at `metadata`, mostly tier C, are still searchable through their title+abstract
 vector and an abstract-only chunk.
+
+## Ranking
+
+`search_passages` (and `galrag search`) ranks in four steps; every knob is a `GALRAG_*`
+setting in `galrag/config.py` and the defaults were chosen with `galrag eval` on
+`tests/queries.yaml` (55 questions, 88 expected papers, all in the corpus with full text).
+
+1. **Candidates.** `search_candidates` (100) passages from the dense index and 100 from
+   BM25, plus the top 100 papers by title+abstract vector, each represented by its
+   abstract chunk (`paper_rrf_weight`, 1.0). Reciprocal-rank fusion (`k = 60`) merges
+   the three lists.
+2. **Citation prior.** `citation_boost` (1.0) adds `log(1+citations)/log(1001)/60` to the
+   fused score, so a 1000-citation paper gains as much as a rank-1 hit from one
+   retriever. It favours the canonical paper on a topic over the many later papers that
+   discuss it.
+3. **Rerank.** The top `rerank_top_n` (100) passages go through the cross-encoder. With
+   `rerank_blend` (1.0) the final order is an RRF of the reranker's rank and the fused
+   rank, so the retrievers' agreement still counts; at 0 the reranker alone decides.
+4. **Diversify.** At most `max_chunks_per_paper` (2) passages per paper in the top-k; the
+   rest fill up behind. `read_section` / `read_paragraphs` give the rest of a paper.
+
+Effect on the eval set (k = 10, distinct papers among the top-10 passages):
+
+| configuration | recall@10 | hit rate@10 | MRR |
+|---|---|---|---|
+| before (bge-reranker-base, top-50, no fusion extras) | 0.533 | 0.636 | 0.462 |
+| same, reranker off | 0.564 | 0.655 | 0.419 |
+| paper-level fusion + 2-per-paper cap | 0.585 | 0.691 | 0.465 |
+| + citation prior (0.5) | 0.609 | 0.727 | 0.489 |
+| bge-reranker-v2-m3 alone | 0.597 | 0.691 | 0.498 |
+| v2-m3 + fusion + cap + citation prior (1.0) | 0.667 | 0.800 | 0.548 |
+| + rerank blend (current defaults) | 0.694 | 0.836 | 0.642 |
+
+Two findings worth knowing: feeding the old `bge-reranker-base` more candidates made
+results *worse* (it promoted passages from later papers that merely cite the expected
+one), and the blended order beats trusting either the retrievers or the reranker alone.
+The remaining misses are mostly questions whose "expected" papers are three canonical
+ones among dozens of relevant ones, and questions phrased unlike the paper (e.g.
+"dust-free outflows" for Ferrara et al. 2023). The reranker costs about 1 s per query
+on a GPU; on a CPU-only MCP host set `GALRAG_RERANK_MODEL=BAAI/bge-reranker-base` and
+`GALRAG_RERANK_TOP_N=50`, or `GALRAG_RERANK_ENABLED=false`.
 
 ## Known limitations
 

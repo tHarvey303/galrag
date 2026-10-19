@@ -86,9 +86,18 @@ class Settings(BaseSettings):
     embed_fp16: bool = True          # half precision on CUDA
     embed_workers: int = 2           # processes; this shared node gives one session ~3 cores, so keep it lean
     embed_threads_per_worker: int = 4   # raise both (e.g. 12x8) on a quiet machine
-    rerank_model: str = "BAAI/bge-reranker-base"
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"   # 568M params; bge-reranker-base is 3x faster on CPU but scores worse
     rerank_enabled: bool = True
-    rerank_top_n: int = 50
+    rerank_top_n: int = 100
+    # --- retrieval tuning (defaults chosen with `galrag eval` on tests/queries.yaml, 2026-10-19;
+    # the pre-tuning values were 50 / 20 / 5 / 0 / 0 / 0 / 0 and bge-reranker-base with top_n 50) ---
+    search_candidates: int = 100     # candidates per retriever (vector, FTS) before fusion; >= k*5
+    vector_nprobes: int = 20         # IVF partitions probed per vector query
+    vector_refine_factor: int = 5    # re-rank nprobes*refine_factor*limit PQ candidates with exact distances
+    max_chunks_per_paper: int = 2    # cap on chunks of one paper in the final top-k (0 = no cap)
+    paper_rrf_weight: float = 1.0    # weight of paper-level (title+abstract) hits in the RRF fusion (0 = off)
+    citation_boost: float = 1.0      # prior for well-cited papers in the fusion (0 = off; see store.search)
+    rerank_blend: float = 1.0        # 0: order by reranker alone; w>0: RRF of reranker rank and fused rank (weight w on the fused rank)
 
     @field_validator("work_dir", "lancedb_dir_override", mode="before")
     @classmethod

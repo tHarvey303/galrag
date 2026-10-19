@@ -368,9 +368,18 @@ class VectorStore:
         if where:
             q = q.where(where, prefilter=True)
         q = q.select(_CHUNK_COLS + ["_distance"])
-        if any(i.index_type.startswith("IVF") for i in t.list_indices()):
-            q = q.nprobes(20).refine_factor(5)
+        if any(i.index_type.upper().startswith("IVF") for i in t.list_indices()):
+            q = q.nprobes(self.settings.vector_nprobes).refine_factor(self.settings.vector_refine_factor)
         return q.to_list()
+
+    def _abstract_rows(self, paper_keys: Sequence[str]) -> list[dict]:
+        """The abstract chunk (ordinal 0) of each paper, used to inject paper-level hits
+        into the passage ranking."""
+        t = self.chunks
+        if t is None or not paper_keys:
+            return []
+        q = t.search().where(f"paper_key IN {_in_list(paper_keys)} AND kind = 'abstract'")
+        return q.select(_CHUNK_COLS).limit(len(paper_keys) * 2).to_list()
 
     def _fts_hits(self, query: str, n: int, where: str | None) -> list[dict]:
         fq = fts_query(query)
@@ -390,13 +399,15 @@ class VectorStore:
         if self.chunks is None or self.chunks.count_rows() == 0 or not query.strip():
             return []
         where = build_where(filters)
-        do_rerank = self.settings.rerank_enabled if rerank is None else rerank
-        n = max(k * 5, 50)
+        s = self.settings
+        do_rerank = s.rerank_enabled if rerank is None else rerank
+        n = max(k * 5, s.search_candidates)
         if do_rerank:
-            n = max(n, self.settings.rerank_top_n)
+            n = max(n, s.rerank_top_n)
 
         vec_rows: list[dict] = []
         fts_rows: list[dict] = []
+        qv = None
         if mode in ("hybrid", "vector"):
             qv = self.embedder.embed_queries([query])[0]
             vec_rows = self._vector_hits(qv, n, where)
@@ -415,16 +426,67 @@ class VectorStore:
             e["scores"]["fts_rank"] = float(rank)
             e["scores"]["rrf"] = e["scores"].get("rrf", 0.0) + 1.0 / (RRF_K + rank)
 
+        f = filters or {}
+        if (mode == "hybrid" and s.paper_rrf_weight > 0 and qv is not None
+                and not f.get("kinds") and not f.get("source_in")):
+            # Third retriever: paper-level (title+abstract) vectors.  Each paper hit is
+            # represented by its abstract chunk; it joins the fusion with weight w.
+            # Skipped under chunk-level filters (kinds / source) that the abstract chunk
+            # might not satisfy; the paper table only has the paper-level columns.
+            paper_where = build_where({k: v for k, v in f.items() if k not in ("kinds", "source_in")})
+            prow = self._paper_hits(qv, n, paper_where)
+            prank = {r["paper_key"]: rank for rank, r in enumerate(prow, 1)}
+            by_key = {r["paper_key"]: r for r in self._abstract_rows(list(prank))}
+            for key, rank in prank.items():
+                r = by_key.get(key)
+                if r is None:
+                    continue
+                e = cand.setdefault(r["chunk_id"], {"row": r, "scores": {}})
+                e["scores"]["paper_rank"] = float(rank)
+                e["scores"]["rrf"] = e["scores"].get("rrf", 0.0) + s.paper_rrf_weight / (RRF_K + rank)
+
+        if mode == "hybrid" and s.citation_boost > 0:
+            # Mild prior for well-cited papers: at weight 1 a 1000-citation paper gains as
+            # much fused score as a rank-1 hit from one retriever (1/RRF_K).
+            for e in cand.values():
+                c = e["row"].get("citation_count") or 0
+                e["scores"]["cite_boost"] = s.citation_boost * math.log1p(max(0, c)) / math.log1p(1000) / RRF_K
+                e["scores"]["rrf"] = e["scores"].get("rrf", 0.0) + e["scores"]["cite_boost"]
+
         primary = {"hybrid": "rrf", "vector": "vector", "fts": "fts"}[mode]
         ordered = sorted(cand.values(), key=lambda e: -e["scores"][primary])
 
         if do_rerank and ordered:
-            top = ordered[: self.settings.rerank_top_n]
+            top = ordered[: s.rerank_top_n]
             rs = self.reranker.rerank(query, [e["row"]["text"] for e in top])
-            for e, s in zip(top, rs):
-                e["scores"]["rerank"] = s
-            top.sort(key=lambda e: -e["scores"]["rerank"])
-            ordered, primary = top, "rerank"
+            for e, sc in zip(top, rs):
+                e["scores"]["rerank"] = sc
+            if s.rerank_blend > 0:
+                # Keep the retrievers' opinion: RRF of the reranker's rank and the fused rank.
+                for fused_rank, e in enumerate(top, 1):
+                    e["scores"]["fused_rank"] = float(fused_rank)
+                by_rr = sorted(top, key=lambda e: -e["scores"]["rerank"])
+                for rr_rank, e in enumerate(by_rr, 1):
+                    e["scores"]["final"] = (1.0 / (RRF_K + rr_rank)
+                                            + s.rerank_blend / (RRF_K + e["scores"]["fused_rank"]))
+                top.sort(key=lambda e: -e["scores"]["final"])
+                ordered, primary = top, "final"
+            else:
+                top.sort(key=lambda e: -e["scores"]["rerank"])
+                ordered, primary = top, "rerank"
+
+        if s.max_chunks_per_paper > 0:
+            # Diversify: at most N chunks per paper in the top-k, the rest fill up behind.
+            seen: dict[str, int] = {}
+            head, tail = [], []
+            for e in ordered:
+                pk = e["row"]["paper_key"]
+                if seen.get(pk, 0) < s.max_chunks_per_paper:
+                    seen[pk] = seen.get(pk, 0) + 1
+                    head.append(e)
+                else:
+                    tail.append(e)
+            ordered = head + tail
 
         hits = []
         for i, e in enumerate(ordered[:k], 1):
@@ -433,6 +495,15 @@ class VectorStore:
                                   title=r.get("title") or "", authors_short=r.get("authors_short") or "",
                                   scores=e["scores"]))
         return hits
+
+    def _paper_hits(self, qvec: np.ndarray, n: int, where: str | None) -> list[dict]:
+        t = self.papers
+        if t is None:
+            return []
+        q = t.search(qvec.tolist(), vector_column_name="vector").distance_type("cosine").limit(n)
+        if where:
+            q = q.where(where, prefilter=True)
+        return q.select(["paper_key", "_distance"]).to_list()
 
     # ------------------------------------------------------------ papers
     def upsert_papers(self, items: Sequence[PaperMeta | dict], vectors: np.ndarray) -> int:
@@ -471,7 +542,7 @@ class VectorStore:
             q = q.where(where, prefilter=True)
         out = []
         for r in q.select(["paper_key", "title", "year", "first_author", "citation_count",
-                           "refereed"]).to_list():
+                           "refereed", "_distance"]).to_list():
             r["score"] = 1.0 - float(r.pop("_distance", 0.0))
             out.append(r)
         return out
