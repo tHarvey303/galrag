@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <link href="http://arxiv.org/api/query?search_query%3Dcat%3Aastro-ph.GA" rel="self" type="application/atom+xml"/>
+  <title type="html">ArXiv Query: search_query=cat:astro-ph.GA</title>
+  <id>http://arxiv.org/api/test-fixture</id>
+  <updated>2026-10-26T00:00:00-04:00</updated>
+  <opensearch:totalResults xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">3</opensearch:totalResults>
+  <opensearch:startIndex xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">0</opensearch:startIndex>
+  <opensearch:itemsPerPage xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">3</opensearch:itemsPerPage>
+  <entry>
+    <id>http://arxiv.org/abs/2610.28515v1</id>
+    <updated>2026-10-20T17:59:59Z</updated>
+    <published>2026-10-20T17:59:59Z</published>
+    <title>A JWST view of
+  compact star-forming galaxies at z&gt;10</title>
+    <summary>  We present JWST/NIRSpec spectroscopy of a sample of galaxies at high
+redshift. The objects are compact and
+metal-poor. We discuss implications for reionization.
+</summary>
+    <author><name>Jane Doe</name></author>
+    <author><name>Arjen van der Wel</name></author>
+    <author><name>Bob Ross</name></author>
+    <arxiv:comment>12 pages, 5 figures</arxiv:comment>
+    <link href="http://arxiv.org/abs/2610.28515v1" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2610.28515v1" rel="related" type="application/pdf"/>
+    <arxiv:primary_category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.28073v1</id>
+    <updated>2026-10-20T12:00:00Z</updated>
+    <published>2026-10-20T12:00:00Z</published>
+    <title>Late-time radio afterglow of a long gamma-ray burst</title>
+    <summary>We report radio monitoring of a long GRB afterglow. The light curve
+shows a late jet break. We constrain the circumburst density.</summary>
+    <author><name>Alice Smith</name></author>
+    <author><name>Carlos de la Cruz</name></author>
+    <link href="http://arxiv.org/abs/2610.28073v1" rel="alternate" type="text/html"/>
+    <arxiv:primary_category term="astro-ph.HE" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.HE" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.27526v1</id>
+    <updated>2026-10-21T09:30:00Z</updated>
+    <published>2026-10-21T09:30:00Z</published>
+    <title>Stellar streams of the Sagittarius dwarf galaxy</title>
+    <summary>We model the tidal debris of the Sagittarius dwarf galaxy. The stream
+orbit constrains the Milky Way halo shape.</summary>
+    <author><name>Eve Miller</name></author>
+    <author><name>Frank Jones</name></author>
+    <link href="http://arxiv.org/abs/2610.27526v1" rel="alternate" type="text/html"/>
+    <arxiv:primary_category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="astro-ph.GA" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+</feed>

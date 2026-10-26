@@ -178,12 +178,7 @@ def ingest_ident(db: Database, store, embedder, ident: str, *, embed: bool = Tru
     """Ingest one identifier (or ``query:<ADS query>``): metadata -> full text -> embed.
 
     Returns one result dict per paper with the outcome of each stage."""
-    from galrag.fetch import FetchError
-    from galrag.parse import load_document
-    from galrag.pipeline import fetch_and_parse_one
-
     ident = ident.strip()
-    results: list[dict[str, Any]] = []
     if ident.lower().startswith("query:"):
         keys = harvest_exact(db, ident[6:].strip(), max_records=max_records, client=client)
         if not keys:
@@ -203,8 +198,21 @@ def ingest_ident(db: Database, store, embedder, ident: str, *, embed: bool = Tru
         else:
             keys = [key]
 
+    return process_paper_keys(db, store, embedder, keys, embed=embed, force_fetch=force_fetch,
+                              base={"ident": ident, "metadata": meta_stage})
+
+
+def process_paper_keys(db: Database, store, embedder, keys: Iterable[str], *, embed: bool = True,
+                       force_fetch: bool = False, base: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Fetch/parse and (optionally) embed papers that are already in SQLite.  Returns one
+    result dict per paper (``base`` is copied into each) with the outcome of each stage."""
+    from galrag.fetch import FetchError
+    from galrag.parse import load_document
+    from galrag.pipeline import fetch_and_parse_one
+
+    results: list[dict[str, Any]] = []
     for key in keys:
-        res: dict[str, Any] = {"ident": ident, "paper_key": key, "metadata": meta_stage}
+        res: dict[str, Any] = {**(base or {}), "paper_key": key}
         row = db.get_row(key)
         status = row["status"] if row is not None else None
         res["status_before"] = status
@@ -285,15 +293,19 @@ def update_corpus(db: Database, store, embedder_factory, *, process: bool = True
         if own:
             client.close()
     out: dict[str, Any] = {"ads_new": n_new, "ads_updated": n_upd, "since": t0}
-    if not process or n_new == 0:
+    # papers taken from the arXiv feed that ADS has now indexed: re-keyed to the bibcode,
+    # their old store rows go, and they are re-embedded below under the new key
+    rekeyed = [new for _, new in purge_rekeyed(db, store)]
+    out["rekeyed"] = len(rekeyed)
+    if not process or (n_new == 0 and not rekeyed):
         return out
     todo = keys_harvested_since(db, t0, limit=max_papers)
     out["fulltext_queue"] = len(todo)
     out["fetch"] = run_fetch_parse(db, paper_keys=todo) if todo else {}
-    new_all = keys_harvested_since(db, t0, tiers=None, statuses=None)
+    new_all = keys_harvested_since(db, t0, tiers=None, statuses=None) + rekeyed
     if new_all:
         emb = embedder_factory()
-        out["embed"] = embed_fulltext(db, store, emb, todo)
+        out["embed"] = embed_fulltext(db, store, emb, todo + rekeyed)
         out["paper_vectors"] = {"papers": 0, "abstract_chunks": 0}
         for i in range(0, len(new_all), 1000):
             r = embed_paper_vectors(db, store, emb, new_all[i:i + 1000])
@@ -304,6 +316,172 @@ def update_corpus(db: Database, store, embedder_factory, *, process: bool = True
         except Exception as e:  # noqa: BLE001
             log.warning("index refresh failed: %s", e)
     return out
+
+
+# ---------------------------------------------------------------- re-keyed papers
+def purge_rekeyed(db: Database, store) -> list[tuple[str, str]]:
+    """Delete vector-store rows of papers that were re-keyed from ``arXiv:<id>`` to a
+    bibcode (see :meth:`galrag.db.Database.upsert_papers`).  Returns the (old, new) key
+    pairs purged; the new keys still need embedding (status ``parsed``, no paper vector)."""
+    done: list[tuple[str, str]] = []
+    for old, new in db.pending_rekeys():
+        try:
+            store.delete_paper(old)
+            done.append((old, new))
+        except Exception:
+            log.exception("could not purge store rows of re-keyed paper %s (-> %s)", old, new)
+    if done:
+        db.mark_rekeys_cleaned([o for o, _ in done])
+    return done
+
+
+# ---------------------------------------------------------------- arXiv RSS feed
+def ingest_arxiv_feed(db: Database, store, embedder_factory, *, category: str | None = None,
+                      feed_path: str | None = None, dry_run: bool = False, embed: bool = True,
+                      max_papers: int | None = None, min_score: float | None = None,
+                      include_replacements: bool = False, use_ads: bool = True,
+                      client=None, since: str | None = None, until: str | None = None) -> dict[str, Any]:
+    """Screen one day's arXiv listing (or, with ``since``, every submission in a date range
+    from the arXiv API) and ingest the relevant papers.
+
+    Every entry is screened with the topic keyword rule
+    (:func:`galrag.arxiv_feed.topic_keywords`, the local mirror of the ADS harvest query)
+    and, when ``min_score`` > 0 or ``dry_run``, scored by the cross-encoder reranker
+    (``store.reranker``) against ``settings.feed_topic`` (0-1; the bi-encoder cosine to the
+    corpus does not separate topics, the cross-encoder does).  An entry is accepted when
+    it matches a keyword or its topic score reaches ``min_score``.
+    Accepted papers get ADS metadata when ADS already has them, otherwise metadata from
+    the feed (keyed ``arXiv:<id>``, re-keyed by a later ADS update), then full text and
+    embeddings.  Replacements of papers already in the corpus are skipped unless
+    ``include_replacements`` (then they are re-fetched and re-embedded).  With
+    ``dry_run`` nothing is written except the ``arxiv_feed`` log."""
+    from galrag.arxiv_feed import fetch_feed, fetch_listing, meta_from_feed, topic_keywords
+
+    s = get_settings()
+    if min_score is None:
+        min_score = s.feed_min_score
+    if since:
+        info, entries = fetch_listing(category, since=since, until=until)
+    else:
+        info, entries = fetch_feed(category, path=feed_path)
+    run = db.start_run("rss", info.get("source"))
+    out: dict[str, Any] = {"feed": info, "n_entries": len(entries), "min_score": min_score,
+                           "dry_run": dry_run, "by_type": {}, "accepted": [], "skipped": [],
+                           "rejected": 0, "ingested": [], "purged_rekeyed": 0}
+    for e in entries:
+        out["by_type"][e.announce_type] = out["by_type"].get(e.announce_type, 0) + 1
+
+    # -- which entries are candidates
+    cand: list[dict[str, Any]] = []
+    for e in entries:
+        key = db.resolve(f"arXiv:{e.arxiv_id}")
+        row = db.get_row(key) if key else None
+        have_text = row is not None and row["status"] in (Status.PARSED, Status.CHUNKED, Status.EMBEDDED)
+        item = {"arxiv_id": e.arxiv_id, "title": e.title, "announce_type": e.announce_type,
+                "categories": e.categories, "paper_key": key, "status_before": row["status"] if row else None}
+        if e.is_replacement and not include_replacements:
+            item["note"] = "replacement"
+            out["skipped"].append(item)
+        elif have_text and not (e.is_replacement and include_replacements):
+            item["note"] = "already in corpus"
+            out["skipped"].append(item)
+        else:
+            cand.append({**item, "entry": e, "keywords": topic_keywords(e.title, e.abstract)})
+
+    # -- topic score from the cross-encoder (one batch; ~1 s per paper on a busy CPU)
+    if cand and (min_score > 0 or dry_run):
+        try:
+            scores = store.reranker.rerank(s.feed_topic, [c["entry"].text for c in cand])
+            for c, sc in zip(cand, scores):
+                c["topic_score"] = round(float(sc), 4)
+        except Exception as exc:
+            log.exception("feed topic scoring failed; using the keyword rule only")
+            out["score_error"] = str(exc)[:200]
+    for c in cand:
+        sc = c.get("topic_score")
+        c["accept"] = bool(c["keywords"]) or (min_score > 0 and sc is not None and sc >= min_score)
+    cand.sort(key=lambda c: (-int(c["accept"]), -(c.get("topic_score") or 0.0)))
+    accepted = [c for c in cand if c["accept"]]
+    if max_papers is not None and len(accepted) > max_papers:
+        for c in accepted[max_papers:]:
+            c["accept"] = False
+            c["note"] = "over max_papers"
+        accepted = accepted[:max_papers]
+    out["rejected"] = sum(1 for c in cand if not c["accept"])
+    out["accepted"] = [_feed_public(c) for c in accepted]
+    if dry_run:
+        out["candidates"] = [_feed_public(c) for c in cand]
+
+    # -- metadata + full text + embeddings
+    results = []
+    if accepted and not dry_run:
+        from galrag.ads import ADSClient
+
+        own = client is None
+        if use_ads and client is None and s.ads_token:
+            try:
+                client = ADSClient()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("ADS unavailable for the feed run (%s); using feed metadata", exc)
+                client = None
+        try:
+            for c in accepted:
+                e = c["entry"]
+                key = c["paper_key"]
+                stage = "already in corpus"
+                if key is None and client is not None:
+                    try:
+                        found = harvest_exact(db, ads_query_for(f"arXiv:{e.arxiv_id}"), max_records=1,
+                                              client=client)
+                        if found:
+                            key, stage = found[0], "ADS"
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("ADS lookup failed for %s: %s", e.arxiv_id, exc)
+                if key is None:
+                    m = meta_from_feed(e)
+                    db.upsert_papers([m])
+                    key, stage = m.paper_key, "feed"
+                c["paper_key"], c["metadata"] = key, stage
+            emb = embedder_factory() if embed else None
+            for c in accepted:
+                e = c["entry"]
+                force = bool(e.is_replacement and include_replacements)
+                r = process_paper_keys(db, store, emb, [c["paper_key"]], embed=embed, force_fetch=force,
+                                       base={"arxiv_id": e.arxiv_id, "metadata": c["metadata"]})
+                results.extend(r)
+            if embed:
+                out["purged_rekeyed"] = len(purge_rekeyed(db, store))
+                try:
+                    store.refresh_indexes()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("index refresh failed: %s", exc)
+        finally:
+            if own and client is not None:
+                client.close()
+    out["ingested"] = results
+
+    # -- bookkeeping
+    ts_note = "dry-run" if dry_run else None
+    log_rows = []
+    for c in cand:
+        log_rows.append({"arxiv_id": c["arxiv_id"], "announce_type": c["announce_type"], "title": c["title"],
+                         "categories": ",".join(c["categories"]), "keywords": ",".join(c["keywords"]),
+                         "topic_score": c.get("topic_score"), "paper_key": c.get("paper_key"),
+                         "decision": ts_note or ("accepted" if c["accept"] else "rejected"),
+                         "note": c.get("note")})
+    for c in out["skipped"]:
+        log_rows.append({"arxiv_id": c["arxiv_id"], "announce_type": c["announce_type"], "title": c["title"],
+                         "categories": ",".join(c["categories"]), "paper_key": c.get("paper_key"),
+                         "decision": "skipped", "note": c.get("note")})
+    db.log_feed_items(log_rows)
+    db.finish_run(run, n_new=len(results), n_updated=len(accepted),
+                  note=f"{info.get('updated')}: {len(entries)} items, {len(accepted)} accepted"
+                       + (" (dry run)" if dry_run else ""))
+    return out
+
+
+def _feed_public(c: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in c.items() if k != "entry"}
 
 
 # ---------------------------------------------------------------- stats

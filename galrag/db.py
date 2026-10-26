@@ -99,6 +99,28 @@ CREATE TABLE IF NOT EXISTS documents (
     json_gz        BLOB NOT NULL,        -- gzip(Document.model_dump_json())
     saved_at       TEXT NOT NULL
 );
+-- a paper first stored under arXiv:<id> (from the RSS feed) and later re-keyed to its ADS
+-- bibcode; the vector store still holds rows under old_key until store_cleaned=1
+CREATE TABLE IF NOT EXISTS rekeyed (
+    old_key       TEXT PRIMARY KEY,
+    new_key       TEXT NOT NULL,
+    at            TEXT NOT NULL,
+    store_cleaned INTEGER NOT NULL DEFAULT 0
+);
+-- every arXiv RSS item seen by `galrag rss`, with the relevance decision taken
+CREATE TABLE IF NOT EXISTS arxiv_feed (
+    arxiv_id      TEXT PRIMARY KEY,
+    first_seen    TEXT NOT NULL,
+    last_seen     TEXT NOT NULL,
+    announce_type TEXT,
+    title         TEXT,
+    categories    TEXT,
+    keywords      TEXT,                  -- matched topic terms, comma-separated
+    topic_score   REAL,                  -- reranker score of title+abstract vs settings.feed_topic (0-1)
+    decision      TEXT NOT NULL,         -- accepted | rejected | skipped | dry-run
+    paper_key     TEXT,
+    note          TEXT
+);
 """
 
 _ARXIV_NEW = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?$")
@@ -165,7 +187,9 @@ class Database:
 
     # ------------------------------------------------------------------ papers
     def upsert_papers(self, metas: Iterable[PaperMeta]) -> tuple[int, int]:
-        """Insert or refresh metadata.  Never regresses ``status`` past 'metadata'.
+        """Insert or refresh metadata.  Never regresses ``status`` past 'metadata', except
+        that an ADS record arriving for a paper stored under ``arXiv:<id>`` (from the RSS
+        feed) re-keys that row to the bibcode (see :meth:`_rekey`) and counts as updated.
 
         Returns (n_new, n_updated)."""
         n_new = n_upd = 0
@@ -173,6 +197,12 @@ class Database:
         with self.tx() as c:
             for m in metas:
                 row = c.execute("SELECT status FROM papers WHERE paper_key=?", (m.paper_key,)).fetchone()
+                if row is None and m.bibcode and m.arxiv_id:
+                    old_key = f"arXiv:{m.arxiv_id}"
+                    if c.execute("SELECT 1 FROM papers WHERE paper_key=?", (old_key,)).fetchone():
+                        self._rekey(c, old_key, m.paper_key, ts)
+                        row = c.execute("SELECT status FROM papers WHERE paper_key=?",
+                                        (m.paper_key,)).fetchone()
                 if row is None:
                     c.execute(
                         """INSERT INTO papers(paper_key,bibcode,arxiv_id,doi,title,first_author,year,pubdate,
@@ -213,6 +243,65 @@ class Database:
                     c.executemany("INSERT OR IGNORE INTO refs(citing_key,cited_bibcode) VALUES(?,?)",
                                   [(m.paper_key, r) for r in m.references])
         return n_new, n_upd
+
+    def _rekey(self, c: sqlite3.Connection, old_key: str, new_key: str, ts: str) -> None:
+        """Move a paper stored under ``arXiv:<id>`` (feed metadata) to its ADS bibcode key.
+
+        The row, identifiers, references and parsed document follow the paper.  A paper
+        that was already embedded goes back to ``parsed`` with ``paper_vec``/``abs_chunk``
+        cleared: the vector store holds its rows under the old key, so the next embed pass
+        re-embeds it under the new one, and :func:`galrag.service.purge_rekeyed` deletes
+        the old rows (bookkeeping in the ``rekeyed`` table)."""
+        c.execute("UPDATE papers SET paper_key=?, updated_at=? WHERE paper_key=?", (new_key, ts, old_key))
+        c.execute("UPDATE papers SET status=?, n_chunks=0 WHERE paper_key=? AND status=?",
+                  (Status.PARSED.value, new_key, Status.EMBEDDED.value))
+        c.execute("UPDATE papers SET paper_vec=0, abs_chunk=0 WHERE paper_key=?", (new_key,))
+        c.execute("UPDATE identifiers SET paper_key=? WHERE paper_key=?", (new_key, old_key))
+        c.execute("UPDATE refs SET citing_key=? WHERE citing_key=?", (new_key, old_key))
+        c.execute("UPDATE arxiv_feed SET paper_key=? WHERE paper_key=?", (new_key, old_key))
+        row = c.execute("SELECT json_gz FROM documents WHERE paper_key=?", (old_key,)).fetchone()
+        if row is not None:
+            doc = Document.model_validate_json(gzip.decompress(row[0]))
+            doc.paper_key = new_key
+            c.execute("DELETE FROM documents WHERE paper_key=?", (old_key,))
+            c.execute(self._DOC_UPSERT, self._doc_row(doc, ts))
+        c.execute("INSERT OR REPLACE INTO rekeyed(old_key,new_key,at,store_cleaned) VALUES(?,?,?,0)",
+                  (old_key, new_key, ts))
+        log.info("re-keyed %s -> %s", old_key, new_key)
+
+    def pending_rekeys(self) -> list[tuple[str, str]]:
+        """(old_key, new_key) pairs whose old rows may still be in the vector store."""
+        return [(r[0], r[1]) for r in self.conn.execute(
+            "SELECT old_key, new_key FROM rekeyed WHERE store_cleaned=0")]
+
+    def mark_rekeys_cleaned(self, old_keys: Iterable[str]) -> None:
+        with self.tx() as c:
+            c.executemany("UPDATE rekeyed SET store_cleaned=1 WHERE old_key=?", [(k,) for k in old_keys])
+
+    # ------------------------------------------------------------ arXiv feed log
+    def log_feed_items(self, rows: Iterable[dict]) -> None:
+        """Upsert ``arxiv_feed`` rows (dicts with the table's columns; ``first_seen`` is
+        kept from the first sighting)."""
+        ts = now_iso()
+        with self.tx() as c:
+            for r in rows:
+                c.execute(
+                    """INSERT INTO arxiv_feed(arxiv_id,first_seen,last_seen,announce_type,title,categories,
+                       keywords,topic_score,decision,paper_key,note) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(arxiv_id) DO UPDATE SET last_seen=excluded.last_seen,
+                       announce_type=excluded.announce_type, title=excluded.title,
+                       categories=excluded.categories, keywords=excluded.keywords,
+                       topic_score=excluded.topic_score, decision=excluded.decision,
+                       paper_key=COALESCE(excluded.paper_key, arxiv_feed.paper_key), note=excluded.note""",
+                    (r["arxiv_id"], ts, ts, r.get("announce_type"), r.get("title"), r.get("categories"),
+                     r.get("keywords"), r.get("topic_score"), r["decision"], r.get("paper_key"), r.get("note")))
+
+    def feed_history(self, *, decision: str | None = None, limit: int = 100) -> list[sqlite3.Row]:
+        q, vals = "SELECT * FROM arxiv_feed", []
+        if decision:
+            q += " WHERE decision=?"; vals.append(decision)
+        q += f" ORDER BY last_seen DESC, topic_score DESC LIMIT {int(limit)}"
+        return self.conn.execute(q, vals).fetchall()
 
     def resolve(self, ident: str) -> str | None:
         """Map any identifier to a paper_key (None if unknown)."""

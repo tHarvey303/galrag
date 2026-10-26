@@ -16,11 +16,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # The corpus definition.  Kept here (not in code paths) so it can be tuned.
-TOPIC_TERMS = (
-    '"high redshift" OR "high-redshift" OR "early universe" OR reionization OR '
-    '"cosmic dawn" OR "cosmic noon" OR "Lyman break" OR "Lyman-break" OR '
-    '"Lyman alpha emitter" OR "Lyman-alpha emitter" OR JWST OR "epoch of reionization"'
+# The topic terms, one source of truth for the ADS query below and for the local rule that
+# screens arXiv RSS listings (galrag.arxiv_feed.topic_keywords).
+TOPIC_KEYWORDS = (
+    "high redshift", "high-redshift", "early universe", "reionization", "cosmic dawn",
+    "cosmic noon", "Lyman break", "Lyman-break", "Lyman alpha emitter", "Lyman-alpha emitter",
+    "JWST", "epoch of reionization",
 )
+TOPIC_TERMS = " OR ".join(f'"{k}"' if (" " in k or "-" in k) else k for k in TOPIC_KEYWORDS)
 TOPIC_QUERY = f"collection:astronomy AND abs:(galaxy OR galaxies) AND abs:({TOPIC_TERMS})"
 
 # Fields requested from ADS for every record.  ``reference`` is the cited-bibcode list.
@@ -62,6 +65,16 @@ class Settings(BaseSettings):
     tier_a_year_min: int = 2015
     tier_a_min_citations: int = 50
     review_bibstems: tuple[str, ...] = ("ARA&A", "A&ARv", "PhR", "NewAR", "SSRv")
+    # --- arXiv RSS listings (`galrag rss` / MCP ingest_arxiv_feed) ---
+    feed_category: str = "astro-ph.GA"   # rss.arxiv.org/rss/<category>; cross-lists into it are included
+    # Optional second screen: the cross-encoder reranker scores each title+abstract against this
+    # topic description (0-1).  On 2026-10-26's astro-ph listing on-topic papers scored 0.19-0.39 and
+    # clearly off-topic ones < 0.1; the keyword rule alone misses near-topic papers such as dwarf-galaxy
+    # star formation (0.39).  0 = topic keywords only; ~0.25 also accepts near-topic papers.
+    feed_min_score: float = 0.0
+    feed_topic: str = ("Formation and evolution of galaxies in the early universe at high redshift: "
+                       "cosmic dawn, the epoch of reionization, Lyman-break galaxies and Lyman-alpha "
+                       "emitters, cosmic noon, and JWST observations of distant galaxies.")
 
     # --- network etiquette ---
     ads_rows_per_page: int = 2000

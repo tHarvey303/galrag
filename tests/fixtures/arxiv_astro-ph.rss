@@ -1,0 +1,95 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<rss xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0">
+  <channel>
+    <title>astro-ph updates on arXiv.org</title>
+    <link>http://rss.arxiv.org/rss/astro-ph</link>
+    <description>astro-ph updates on the arXiv.org e-print archive.</description>
+    <atom:link href="http://rss.arxiv.org/rss/astro-ph" rel="self" type="application/rss+xml"/>
+    <docs>http://www.rssboard.org/rss-specification</docs>
+    <language>en-us</language>
+    <lastBuildDate>Mon, 26 Oct 2026 04:00:21 +0000</lastBuildDate>
+    <managingEditor>rss-help@arxiv.org</managingEditor>
+    <pubDate>Mon, 26 Oct 2026 00:00:00 -0400</pubDate>
+    <skipDays>
+      <day>Saturday</day>
+      <day>Sunday</day>
+    </skipDays>
+    <item>
+      <title>Alignment-driven binary evolution in warped circumbinary discs: 3D moving-mesh hydrodynamics of eccentric and inclined binaries</title>
+      <link>https://arxiv.org/abs/2610.31688</link>
+      <description>arXiv:2610.31688v1 Announce Type: new 
+Abstract: We present three-dimensional moving-mesh hydrodynamical simulations (\arepo{}) of equal-mass binaries in circumbinary discs, spanning binary eccentricity ($e = 0.0,\,0.3,\,0.6$) and inclination ($i = 0^\circ$--$60^\circ$), using a locally isothermal $\alpha$-disc ($H/r = \alpha_{\rm visc} = 0.1$) with fixed Keplerian orbits. Discs above the critical inclination $i_{\rm crit}(e)$, decreasing with $e$, drive their interiors near-polar, so eccentricity alone alters the outcome at fixed $i$. Discs reach polar alignment ten times faster than they align toward the binary plane, settling long before the binary's orbit responds. Alignment dictates how the disc acts on the binary. First, a disc tilting back toward the binary plane spends nearly all its torque reorienting the binary's orbit, whereas a disc driven polar redirects it into the orbit itself, which shrinks 10--20 times faster. Second, at $e = 0.6$ the turn to polar is a single transient reshaping the accretion flow, cavity and orbit, with accretion enhanced ($i = 45^\circ$) or suppressed ($i = 60^\circ$). Third, misalignment suppresses coplanar eccentricity pumping: the attractor at $e \approx 0.4$ survives only below $i \approx 15^\circ$, so misaligned binaries circularise and may enter the gravitational-wave regime less eccentric than coplanar models predict. Around a circular binary, the familiar $\approx 4.5$-orbit accretion modulation vanishes while the disc is strongly warped, returning as it realigns, a time-domain signature of misaligned massive black-hole binaries. Finally, observed polar discs around stellar binaries, such as HD~98800~BaBb's, are likely in their final state; intermediate misalignments reflect slower alignment toward the binary plane.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.31688v1</guid>
+      <category>astro-ph.HE</category>
+      <category>astro-ph.GA</category>
+      <category>astro-ph.SR</category>
+      <pubDate>Mon, 26 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <dc:creator>Lazaros Souvaitzis, Magdalena Siwek, Jorge Cuadra</dc:creator>
+    </item>
+    <item>
+      <title>Galaxy Luminosity Functions at z~7-10 from Four Years of JWST Observations</title>
+      <link>https://arxiv.org/abs/2610.32307</link>
+      <description>arXiv:2610.32307v1 Announce Type: new 
+Abstract: We present galaxy luminosity functions at $z\approx 7.4$ and 10 based on a comprehensive search for candidate galaxies at $6.4\lesssim z\lesssim11.3$ in JWST's public NIRCam data four years after its operation. Our work utilises nine fields covering $\sim$1,045~arcmin$^2$ in total, including seven blank fields and two galaxy cluster fields. Using the dropout technique, we selected 3,733 dropouts from the F090W passband and 2,396 dropouts from the F115W passband, which constitute the largest samples of candidate galaxies at $z\approx 7.4$ and $z\approx 10$ to date. Among these objects, 338 F090W-dropouts and 99 F115W-dropouts already have secure redshifts from JWST NIRSpec spectroscopy over four years, which we use to form two large spectroscopic subsamples to assess the magnitude-dependent contamination rates of their parent dropout samples. Our luminosity functions are based on the results after statistically correcting for both incompleteness and contamination. We find that the luminosity function at $z\approx 7.4$ can be well described by a conventional Schechter function but with a faint-end slope of $\alpha=-1.70\pm0.16$ that is significantly shallower than most of the previous studies at $z\approx 7$--8. To verify this result, more imaging and spectroscopy at $\sim$30~mag will be needed. The luminosity function at $z\approx 10$, on the other hand, can hardly be fitted by a Schechter function but is more consistent with a power law in the form of $\Phi(M)\propto 10^{-0.4(\beta+1)M}$, with the best-fit slope of $\beta=-2.36\pm0.16$. While such a behavior is largely driven by the high number densities at $M_{\rm UV}\lesssim -21.8$~mag, it is supported by the currently existing spectroscopic confirmations. Further spectroscopy at the bright end($\lesssim 26$~mag) will be needed to strengthen this result.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.32307v1</guid>
+      <category>astro-ph.GA</category>
+      <pubDate>Mon, 26 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <dc:creator>Bangzheng Sun, Haojing Yan</dc:creator>
+    </item>
+    <item>
+      <title>Star clusters at cosmic dawn I: the emergence of the initial cluster mass function</title>
+      <link>https://arxiv.org/abs/2610.32497</link>
+      <description>arXiv:2610.32497v1 Announce Type: new 
+Abstract: JWST observations of lensed galaxies reveal unusually bright star-cluster candidates within the first billion years after the Big Bang. However, the physical processes shaping the initial cluster mass function (ICMF) remain uncertain. We study the formation of a galaxy embedded in a dark matter halo whose virial mass reaches $10^{10} \mathrm{M}_\odot$ at $z=6$, using cosmological radiation-hydrodynamics zoom-in simulations. Its star clusters, represented by sink particles, accrete gas and form stellar populations that supply radiation and supernova feedback, thereby regulating their own growth. As we do not prescribe an efficiency per free-fall time or a fixed star-cluster formation duration, the ICMF emerges self-consistently. We assess the effects of numerical resolution and stellar radiation. Schechter fits to the central-galaxy ICMF give truncation masses near $6 \times 10^6 \mathrm{M}_\odot$, with substantial uncertainty. At fixed resolution, including stellar radiation makes the low-mass slope of the ICMF shallower, from $-1.60$ to $-1.34$, while doubling the spatial resolution steepens it back to $-1.54$. Stellar radiation also reduces the abundance of low-mass clouds, particularly those with lower gas densities, and shortens the formation time of star clusters to about a Myr, i.e. well before their first supernovae go off. On average, more rapidly fed star clusters accrete for longer, making their final masses rise faster than linearly with the initial accretion rate and contributing to a flatter ICMF. At fixed host-galaxy star formation rate, our brightest simulated clusters reach UV luminosities comparable to those of observed lensed star-cluster candidates.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.32497v1</guid>
+      <category>astro-ph.GA</category>
+      <pubDate>Mon, 26 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Fred S. Thompson, Julien Devriendt, Adrianne Slyz, Taysun Kimm, Cheonsu Kang</dc:creator>
+    </item>
+    <item>
+      <title>Probing the star-forming environment of GRB across cosmic ages with high-resolution X-ray spectroscopy: From \textit{{XMM-Newton}}/RGS and \textit{XRISM}/Resolve to \textit{NewAthena}/X-IFU</title>
+      <link>https://arxiv.org/abs/2610.32786</link>
+      <description>arXiv:2610.32786v1 Announce Type: new 
+Abstract: Optical and infrared GRB absorption spectroscopy provides valuable insight into host-galaxy properties across cosmic time. However, the star-forming region embedding the progenitor, on scales $\lesssim 100~\mathrm{pc}$ is heavily ionized by the GRB emission, making X-ray spectroscopy the sole probe of its physical and chemical conditions. We characterize the GRB-embedding medium as a function of progenitor type and cosmic epoch via high-resolution X-ray spectroscopy. We extend our study to high-redshift GRBs to evaluate how effectively X-ray absorption signatures can distinguish between pristine, Pop~III-, and Pop~II-enriched environments. Using the time-dependent photoionization code \texttt{TEPID}, we self-consistently calculate the ionization structure of the absorber, the energies and the strengths of the resulting absorption lines. We analyze a flux-selected sample of GRBs showing strong evidence for time-dependent photoionization, and search for predicted narrow features in the RGS spectra. We also assess the performance of \textit{XRISM}/Resolve and \textit{NewAthena}/X-IFU in detecting these features. In the single archival case with sufficient RGS signal-to-noise ratio (GRB~090618 at $z=0.54$), we find $\approx 3\sigma$ combined evidence for narrow, highly ionized Fe~L absorption lines. For bright nearby GRBs, \textit{XRISM}/Resolve can detect Fe~K absorption lines even in its current gate-valve-closed configuration ($\sim 3$ expected events/yr). \textit{NewAthena}/X-IFU will enable systematic population studies of GRB environments, delivering redshifts with precision comparable to optical/IR spectroscopy, unaffected by dust obscuration and Ly-$\alpha$ forest absorption. Crucially, it will precisely diagnose the density, size, metallicity, and abundance patterns, ultimately revealing whether high-$z$ GRBs originate in pristine, Pop~III-, or Pop~II-enriched media.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.32786v1</guid>
+      <category>astro-ph.HE</category>
+      <pubDate>Mon, 26 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Luigi Piro, Aishwarya Linesh Thakur, Alfredo Luminari, Fabrizio Nicastro, Yair Krongold</dc:creator>
+    </item>
+    <item>
+      <title>The ALMA REBELS Survey: The [C II] Luminosity Function of UV-Selected Galaxies at $z\sim7$</title>
+      <link>https://arxiv.org/abs/2610.27052</link>
+      <description>arXiv:2610.27052v2 Announce Type: replace 
+Abstract: Luminosity functions (LF) are some of the most basic quantities providing insights into galaxy evolution across cosmic time and enabling a direct comparison between observations and simulations. Here, we present the first [CII]158$\mu$m LF at $z\sim7$ from a sizeable UV-selected ALMA sample. Our analysis makes use of 27 galaxies with significant [CII] emission line detections in the epoch of reionization from the REBELS (Reionization Era Bright Emission Line Survey) ALMA Large Program and its pilot programs. We used these line detections and similar from ALPINE to calibrate UV luminosity-$L_{\mathrm{[CII]}}$ and stellar mass-$L_{\mathrm{[CII]}}$ relations at $z\sim7$. Given the challenge in precisely defining a selection volume for the REBELS sample itself, we rely on published UV LF and stellar mass function (SMF) determinations at $z\sim7$ and three complementary approaches to derive the [CII] LF. The UV LF-based method provides a lower limit on the [CII] LF, due to its missing the most dust-obscured systems. Our SMF-based estimate yields a Schechter function with a characteristic luminosity of $L^*_{\mathrm{[CII]}}=10^{9.11^{+0.11}_{-0.27}} L_\odot$ and a steep faint-end slope. From $z\sim7$ to $z\sim5$, our inferred [CII] LF shows an evolution of +0.3 dex in normalisation and +0.1 dex in $L^*_{\mathrm{[CII]}}$. Our results indicate a general underprediction from models of the abundance of [CII] emitters at high-redshift and thus potentially the number densities of massive yet UV-faint systems implied by our SMF-based method. Additionally, they suggest that 63% of the star formation rate density occurs in massive [CII]-bright systems and that $\sim$60-90% of [CII] emitters at $z\sim7$ may be missed by bright UV selections. This highlights the importance of surveys focusing on especially massive, UV-faint sources at $z&gt;6$.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.27052v2</guid>
+      <category>astro-ph.GA</category>
+      <pubDate>Mon, 26 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <dc:creator>Thomas Herard-Demanche, Pascal A. Oesch, Rychard Bouwens, Jacqueline A. Hodge, Hiddo S. B. Algera, Manuel Aravena, Karin Cescon, Elisabete da Cunha, Pratika Dayal, Andrea Ferrara, Rebecca Fisher, Yoshinobu Fudamoto, Kasper E. Heintz, Hanae Inami, Andrea Pallottini, Lucie E. Rowland, Renske Smit, Laura Sommovigo, Mauro Stefanon, Michael W. Topping, Paul van der Werf, Ivana F. van Leeuwen</dc:creator>
+    </item>
+    <item>
+      <title>Exceptional points and hysteresis in Kerr-Newman quasi-normal modes</title>
+      <link>https://arxiv.org/abs/2610.30049</link>
+      <description>arXiv:2610.30049v1 Announce Type: cross 
+Abstract: Exceptional points (EPs) and eigenstate hysteresis, previously found in Kerr only with an auxiliary scalar field, arise intrinsically in the quasinormal-mode spectrum of Kerr-Newman black holes. Using a hyperboloidal formulation of the coupled gravito-electromagnetic Teukolsky equations and a Chebyshev pseudospectral method, we compute the $\ell=m=2$ spectrum and locate four EPs at up to $99.974\%$ of extremality, one from a new repulsion. The gaps close as a square root branch point, and quasistatic loops around one or more EPs exchange the coalescing modes, confirming hysteresis.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30049v1</guid>
+      <category>gr-qc</category>
+      <category>astro-ph.HE</category>
+      <category>hep-th</category>
+      <pubDate>Mon, 26 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Mario Misas Arcos (Departamento de Electr\'onica y Electromagnetismo), Alberto T. P\'erez (Departamento de Electr\'onica y Electromagnetismo), Carlos F. Sopuerta (Institute of Space Sciences, Institute of Space Studies of Catalonia)</dc:creator>
+    </item>
+
+  </channel>
+</rss>

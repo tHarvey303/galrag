@@ -83,11 +83,40 @@ galrag update                  # ADS records entered since the last run; fetch/p
 galrag update --no-process     # metadata only
 galrag ingest 2405.03781 2023A&A...677A..88B 10.3847/2041-8213/ad4cf3   # any year / doctype
 galrag ingest "query:author:\"^Bunker\" year:2023"  --max-records 10
+galrag rss                         # today's arXiv listing (astro-ph.GA): screen, then ingest the accepted papers
+galrag rss --dry-run               # score and list the candidates; ingest nothing
+galrag rss --min-score 0.25        # also accept near-topic papers by the reranker's topic score
+galrag rss --category astro-ph.CO  # another arXiv category feed
+galrag rss --since 2026-07-26     # backfill: every submission since that date via the arXiv API (--days N is the shorthand)
 ```
 
 `ingest` resolves each identifier through ADS. It does not apply the corpus year or
 doctype filters, and it then fetches, parses and embeds the paper. If no full text is
 available, it embeds the abstract only.
+
+`galrag rss` reads one arXiv RSS listing (`--category`, default `feed_category`) and screens
+each item. An item is accepted if its title and abstract mention galaxy/galaxies and one of
+the `TOPIC_KEYWORDS` in `galrag/config.py` (the same terms as the ADS harvest query). With
+`--min-score` (or `GALRAG_FEED_MIN_SCORE`) it is also accepted when the reranker's score of
+its title and abstract against the topic description in `feed_topic` reaches that value
+(0-1; on-topic papers score about 0.2-0.4, off-topic ones below 0.1, so 0.25 is a
+reasonable start; `--dry-run` shows the scores). Accepted papers
+get ADS metadata if ADS already has them, otherwise feed metadata keyed `arXiv:<id>`, then
+full text and embeddings. Replaced versions are skipped unless `--replacements`. Every item
+seen is logged with its decision in the `arxiv_feed` SQLite table. When a later `galrag
+update` brings the ADS record of an `arXiv:<id>` paper, the row is re-keyed to the bibcode
+(identifiers and references follow), the paper is re-embedded under the bibcode, and the old
+vectors are removed by `purge_rekeyed` (run by `update`, `embed`, `reconcile`, `rss` and
+`scripts/run_embed.py`). The feed holds only one day's announcements, so run it daily;
+`galrag update` catches anything missed via ADS. `--since`, `--until` or `--days` switch to the arXiv API
+listing (`cat:<category> AND submittedDate` range, paged, 3 s between pages, oldest first), which
+carries only new submissions and cross-lists (no replacements). An item already in the corpus with
+full text is skipped; one known to ADS but not yet fetched gets fetched and embedded. For a daily run, add a cron entry (cron uses
+local time, and the feed is rebuilt about 04:00 UTC; the conda env must be on `PATH`):
+
+```
+15 7 * * 1-5 cd /path/to/vector_rag && galrag rss >> data/logs/rss.log 2>&1
+```
 
 ### Querying from the shell
 
@@ -148,6 +177,7 @@ network filesystem.
 | `get_bibtex` | BibTeX by bibcode, cached locally. |
 | `ingest_paper` | Add a paper on demand: metadata, then full text, then embedding. |
 | `update_corpus` | Incremental ADS update, then processing of the new papers. |
+| `ingest_arxiv_feed` | Screen one arXiv RSS listing as `galrag rss` does and ingest the accepted papers. `dry_run=true` lists the candidates only. |
 | `corpus_stats` | Counts per status and tier, index size, last runs and failure reasons. |
 
 Resources: `paper://{ident}` returns metadata, the abstract and the section outline as

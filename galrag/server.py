@@ -651,6 +651,37 @@ async def update_corpus(max_papers: int = 200, process: bool = True) -> dict:
         return _err(e)
 
 
+def _feed_sync(category, dry_run, max_papers, min_score, include_replacements, since=None, until=None) -> dict:
+    store = get_store()
+    return service.ingest_arxiv_feed(get_db(), store, lambda: store.embedder, category=category,
+                                     dry_run=dry_run, max_papers=max_papers, min_score=min_score,
+                                     include_replacements=include_replacements, since=since, until=until)
+
+
+@mcp.tool()
+async def ingest_arxiv_feed(category: str | None = None, dry_run: bool = False, max_papers: int = 25,
+                            min_score: float | None = None, include_replacements: bool = False,
+                            since: str | None = None, until: str | None = None) -> dict:
+    """Screen today's arXiv RSS listing (default category astro-ph.GA) and ingest the papers
+    relevant to the corpus: those matching the corpus topic keywords (galaxies + high
+    redshift / reionization / JWST / ...), plus, if `min_score` > 0, those whose reranker
+    score against the corpus topic description (0-1) reaches it (~0.25 adds near-topic
+    papers such as dwarf-galaxy star formation; off-topic astro-ph papers score < 0.1). Accepted
+    papers get ADS metadata when available (else feed metadata keyed arXiv:<id>), full
+    text and embeddings; replacements are skipped unless `include_replacements`.
+    `since='YYYY-MM-DD'` backfills a date range (to `until`, default today) through the arXiv
+    API instead of today's listing. `dry_run=true` only lists every candidate with its
+    keywords and topic score. Takes ~10-30 s per accepted paper (arXiv rate limit)."""
+    import anyio.to_thread
+
+    try:
+        return await anyio.to_thread.run_sync(_feed_sync, category, dry_run, max_papers, min_score,
+                                              include_replacements, since, until)
+    except Exception as e:
+        log.exception("feed ingest failed")
+        return _err(e)
+
+
 @mcp.tool()
 def corpus_stats() -> dict:
     """Corpus size per ingestion status and tier, vector-store size, last ADS harvest/update

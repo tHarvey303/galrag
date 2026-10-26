@@ -111,6 +111,10 @@ def _loop(a, s, db, store, push, log) -> None:
                 db = _refresh_snapshot(s, db, store, log)
             n_pass += 1
             try:
+                from galrag.service import purge_rekeyed
+
+                if n_purged := len(purge_rekeyed(db, store)):
+                    log.info("purged store rows of %d re-keyed paper(s)", n_purged)
                 if not a.no_abstracts:
                     log.info("abstracts: %s", run_embed_abstracts(db, store, emb, limit=a.limit,
                                                                   on_progress=push))

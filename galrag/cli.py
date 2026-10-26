@@ -1,7 +1,8 @@
 """``galrag`` command-line interface (typer).
 
 Pipeline order: ``harvest`` -> ``fetch`` -> ``embed`` -> ``index``; later ``update``
-(new ADS records) and ``ingest`` (specific papers).  ``serve`` starts the MCP server.
+(new ADS records), ``rss`` (today's arXiv listing) and ``ingest`` (specific papers).
+``serve`` starts the MCP server.
 """
 
 from __future__ import annotations
@@ -154,6 +155,10 @@ def embed(
     db, store = _db(), _store()
     pk = [db.resolve(k) or k for k in _split(keys)] if keys else None
     t0 = time.time()
+    from galrag.service import purge_rekeyed
+
+    if n := len(purge_rekeyed(db, store)):
+        console.print(f"purged store rows of {n} re-keyed paper(s); they are re-embedded below")
     with PoolEmbedder(n_workers=workers, threads_per_worker=threads) as pe:
         if fulltext:
             r = run_embed(db, store, pe, limit=limit, paper_keys=pk)
@@ -218,6 +223,70 @@ def ingest(
             store.refresh_indexes()
         except Exception as e:  # noqa: BLE001
             console.print(f"[yellow]index refresh failed: {e}")
+
+
+@app.command()
+def rss(
+    category: Annotated[str | None, typer.Option(help="arXiv category feed, e.g. astro-ph.GA "
+                                                      "(default: settings.feed_category).")] = None,
+    file: Annotated[Path | None, typer.Option(help="Parse a saved RSS file instead of downloading.")] = None,
+    since: Annotated[str | None, typer.Option(
+        help="Backfill: every submission from this date (YYYY-MM-DD) via the arXiv API instead of "
+             "today's RSS listing.")] = None,
+    until: Annotated[str | None, typer.Option(help="End of the --since range (default today).")] = None,
+    days: Annotated[int | None, typer.Option(help="Backfill the last N days (shorthand for --since).")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Score and list; ingest nothing.")] = False,
+    max_papers: Annotated[int | None, typer.Option(help="Ingest at most N papers (best first).")] = None,
+    min_score: Annotated[float | None, typer.Option(
+        help="Also accept papers whose reranker topic score (0-1) is >= this; ~0.25 adds near-topic "
+             "papers (default: settings.feed_min_score, 0 = keywords only).")] = None,
+    replacements: Annotated[bool, typer.Option("--replacements",
+                                               help="Re-fetch replaced versions of corpus papers.")] = False,
+    ads: Annotated[bool, typer.Option("--ads/--no-ads", help="Look accepted papers up in ADS first.")] = True,
+    embed: Annotated[bool, typer.Option("--embed/--no-embed")] = True,
+    json_out: Annotated[bool, typer.Option("--json", help="Print the full result as JSON.")] = False,
+) -> None:
+    """Screen today's arXiv RSS listing (or a date range, --since/--days, through the arXiv
+    API) with the corpus topic rule (and optionally the reranker's topic score) and ingest the
+    relevant papers: metadata, full text, embeddings."""
+    from datetime import date, timedelta
+
+    from galrag.embed import Embedder
+    from galrag.service import ingest_arxiv_feed
+
+    if days is not None:
+        if since:
+            raise typer.BadParameter("use either --since or --days")
+        since = (date.today() - timedelta(days=days)).isoformat()
+    db = _db()
+    store = _store(embedder=Embedder())
+    t0 = time.time()
+    res = ingest_arxiv_feed(db, store, lambda: store.embedder, category=category,
+                            feed_path=str(file) if file else None, dry_run=dry_run, embed=embed,
+                            max_papers=max_papers, min_score=min_score,
+                            include_replacements=replacements, use_ads=ads, since=since, until=until)
+    if json_out:
+        console.print_json(json.dumps(res, default=str))
+        return
+    f = res["feed"]
+    console.print(f"[bold]{f.get('title')}[/] {f.get('updated')}: {res['n_entries']} items {res['by_type']}; "
+                  f"{len(res['skipped'])} skipped, {res['rejected']} rejected, "
+                  f"{len(res['accepted'])} accepted" + (" (dry run)" if dry_run else ""), highlight=False)
+    rows = res.get("candidates") or res["accepted"]
+    if rows:
+        t = Table(title="candidates" if dry_run else "accepted", title_justify="left")
+        for c in ("arXiv id", "type", "score", "keywords", "title"):
+            t.add_column(c)
+        for c in rows:
+            sc = c.get("topic_score")
+            style = "green" if c["accept"] else "dim"
+            t.add_row(c["arxiv_id"], c["announce_type"], f"{sc:.3f}" if sc is not None else "-",
+                      ", ".join(c["keywords"]), c["title"][:90], style=style)
+        console.print(t)
+    for r in res["ingested"]:
+        console.print(f"  {r['paper_key']}: metadata {r.get('metadata')}; full text {r.get('fulltext')}; "
+                      f"embed {r.get('embed', '-')}", highlight=False)
+    console.print(f"[dim]{time.time() - t0:.0f} s")
 
 
 # ------------------------------------------------------------------ query
@@ -443,9 +512,12 @@ def sync_pull(only: Annotated[str | None, typer.Option(help="sqlite | lancedb")]
 @app.command()
 def reconcile() -> None:
     """Set embedded/n_chunks and paper_vec/abs_chunk in SQLite from the LanceDB contents."""
+    from galrag.service import purge_rekeyed
+
     db, store = _db(), _store()
     t0 = time.time()
     res = db.reconcile_from_store(store)
+    res["purged_rekeyed"] = len(purge_rekeyed(db, store))
     console.print(f"[bold]reconcile:[/] {res} ({time.time() - t0:.0f} s)", highlight=False)
 
 
