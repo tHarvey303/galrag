@@ -12,14 +12,21 @@ from galrag.config import Settings, get_settings
 
 
 def resolve_device(settings: Settings | None = None) -> str:
-    """'auto' -> 'cuda' when a GPU is visible to torch, else 'cpu'."""
+    """'auto' -> 'cuda' when an NVIDIA GPU is visible to torch, else 'mps' on Apple
+    Silicon (Metal), else 'cpu'.  Any non-CPU device is served by one process with the
+    GPU batch size; half precision is applied on CUDA only."""
     s = settings or get_settings()
     dev = (s.embed_device or "auto").lower()
     if dev != "auto":
         return dev
     import torch
 
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def _load_st(model_name: str, device: str, fp16: bool):

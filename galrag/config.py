@@ -95,8 +95,8 @@ class Settings(BaseSettings):
     embed_query_prefix: str = "Represent this sentence for searching relevant passages: "
     embed_batch_size: int = 64
     embed_batch_size_gpu: int = 256
-    embed_device: str = "auto"       # auto | cpu | cuda | cuda:N
-    embed_fp16: bool = True          # half precision on CUDA
+    embed_device: str = "auto"       # auto | cpu | cuda | cuda:N | mps (Apple Silicon)
+    embed_fp16: bool = True          # half precision on CUDA (not applied on mps/cpu)
     embed_workers: int = 2           # processes; this shared node gives one session ~3 cores, so keep it lean
     embed_threads_per_worker: int = 4   # raise both (e.g. 12x8) on a quiet machine
     rerank_model: str = "BAAI/bge-reranker-v2-m3"   # 568M params; bge-reranker-base is 3x faster on CPU but scores worse

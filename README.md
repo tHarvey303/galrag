@@ -376,10 +376,12 @@ on a GPU; on a CPU-only MCP host set `GALRAG_RERANK_MODEL=BAAI/bge-reranker-base
   column breaks. Offsets are exact into `full_text`, but `full_text` itself is less
   clean than text from the LaTeXML HTML. Citation contexts in PDFs use a textual
   "Author et al. YEAR" fallback.
-* **Embedding throughput is CPU-bound.** Expect roughly tens to a few hundred chunks
-  per second, depending on node load and the workers × threads setting (see
-  `scripts/bench_embed.py`). The first query after a cold start also has to load the
-  model.
+* **Embedding throughput is CPU-bound** without a GPU. Expect roughly tens to a few
+  hundred chunks per second, depending on node load and the workers × threads setting
+  (see `scripts/bench_embed.py`). `embed_device=auto` picks CUDA, then Apple Silicon's
+  Metal backend (`mps`), then CPU; on a Mac the embedder and the reranker therefore run
+  on the GPU in one process (fp16 stays CUDA-only). The first query after a cold start
+  also has to load the model.
 * Bibliography entries are linked to bibcodes heuristically against the ADS reference
   list. Unresolved entries are still matched by author and year in
   `citation_contexts`.

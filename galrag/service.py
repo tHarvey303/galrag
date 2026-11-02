@@ -486,15 +486,19 @@ def _feed_public(c: dict[str, Any]) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- stats
 def _du(path) -> int | None:
-    """Disk usage in bytes (``du -sb``; None on failure / timeout)."""
+    """Disk usage in bytes: GNU ``du -sb``, then BSD/macOS ``du -sk`` (KiB) when ``-b`` is
+    unsupported; None on failure / timeout."""
     if not os.path.exists(path):
         return 0
     du = shutil.which("du")
-    if du:
+    if not du:
+        return None
+    for flag, scale in (("-sb", 1), ("-sk", 1024)):
         try:
-            out = subprocess.run([du, "-sb", str(path)], capture_output=True, text=True, timeout=60,
+            out = subprocess.run([du, flag, str(path)], capture_output=True, text=True, timeout=60,
                                  check=False)
-            return int(out.stdout.split()[0])
+            if out.returncode == 0 and out.stdout.strip():
+                return int(out.stdout.split()[0]) * scale
         except (subprocess.TimeoutExpired, ValueError, IndexError):
             return None
     return None
